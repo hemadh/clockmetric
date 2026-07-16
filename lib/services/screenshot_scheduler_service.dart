@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:encrypt/encrypt.dart' as encrypt;
-import 'package:path_provider/path_provider.dart';
 
 import '../main.dart';
-import 'windows_screenshot_service.dart';
+import 'screenshot_capture_service.dart';
 
 class ScreenshotSchedulerService {
   static final ScreenshotSchedulerService instance =
@@ -32,7 +30,6 @@ class ScreenshotSchedulerService {
     if (currentUserRole == 'admin') return;
 
     if (_timer != null && _entryId == entryId) {
-      print('Screenshot scheduler already running');
       return;
     }
 
@@ -41,11 +38,11 @@ class ScreenshotSchedulerService {
     _entryId = entryId;
     _projectId = projectId;
 
-    print('Global screenshot scheduler started');
-
     _timer = Timer.periodic(
       const Duration(minutes: 5),
-      (_) => captureNow(),
+      (_) {
+        captureNow();
+      },
     );
   }
 
@@ -63,36 +60,13 @@ class ScreenshotSchedulerService {
     if (currentWorkspaceId.isEmpty) return;
 
     try {
-      final directory = await getApplicationDocumentsDirectory();
+      final rawBytes =
+          await ScreenshotCaptureService().capture();
 
-      final safeEmployeeName = currentUserName
-          .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-
-      final localPngName =
-          '${safeEmployeeName}_$timestamp.png';
-
-      final localEncName =
-          '${safeEmployeeName}_$timestamp.enc';
-
-      final localPngPath =
-          '${directory.path}\\$localPngName';
-
-      final localEncPath =
-          '${directory.path}\\$localEncName';
-
-      final file =
-          await WindowsScreenshotService().captureFullScreen(
-        localPngPath,
-      );
-
-      if (file == null || !await file.exists()) {
-        print('Screenshot failed');
+      // On Web, screenshot capture returns null.
+      if (rawBytes == null || rawBytes.isEmpty) {
         return;
       }
-
-      final rawBytes = await file.readAsBytes();
 
       final encrypter = encrypt.Encrypter(
         encrypt.AES(
@@ -106,20 +80,27 @@ class ScreenshotSchedulerService {
         iv: _iv,
       );
 
-      final encryptedFile = File(localEncPath);
-
-      await encryptedFile.writeAsBytes(
-        encrypted.bytes,
+      final safeEmployeeName = currentUserName.replaceAll(
+        RegExp(r'[^a-zA-Z0-9_-]'),
+        '_',
       );
 
+      final timestamp =
+          DateTime.now().millisecondsSinceEpoch;
+
+      final encryptedFileName =
+          '${safeEmployeeName}_$timestamp.enc';
+
       final storagePath =
-          '$currentWorkspaceId/$currentUserId/$localEncName';
+          '$currentWorkspaceId/'
+          '$currentUserId/'
+          '$encryptedFileName';
 
       await supabase.storage
           .from('employee-screenshots')
-          .upload(
+          .uploadBinary(
             storagePath,
-            encryptedFile,
+            encrypted.bytes,
           );
 
       final capturedAt = DateTime.now();
@@ -139,18 +120,8 @@ class ScreenshotSchedulerService {
             .add(const Duration(hours: 24))
             .toIso8601String(),
       });
-
-      if (await file.exists()) {
-        await file.delete();
-      }
-
-      if (await encryptedFile.exists()) {
-        await encryptedFile.delete();
-      }
-
-      print('Encrypted screenshot uploaded successfully');
-    } catch (e) {
-      print('Screenshot failed: $e');
+    } catch (error) {
+      print('Screenshot capture failed: $error');
     }
   }
 }
