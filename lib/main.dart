@@ -1,17 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:app_links/app_links.dart';
 import 'screens/accept_invitation_screen.dart';
 import 'screens/dashboard_v2_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/reset_password_screen.dart';
-import 'services/session_timeout_service.dart';
 import 'screens/splash_screen.dart';
+import 'services/session_timeout_service.dart';
 
 final supabase = Supabase.instance.client;
+Uri? startupDeepLink;
 
 const String appVersion = '1.0.0';
 
@@ -23,14 +25,26 @@ String currentWorkspaceName = '';
 
 ValueNotifier<bool> isDarkMode = ValueNotifier(false);
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
+  for (final argument in args) {
+    final uri = Uri.tryParse(argument);
+
+    if (uri != null && uri.scheme == 'timetracker') {
+      startupDeepLink = uri;
+      debugPrint('Startup argument deep link: $uri');
+      break;
+    }
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url: 'https://zakvowocgunowgxxslqm.supabase.co',
-    anonKey:
-        'sb_publishable_CPIzdsRFAy_8hPYucVkcTA_T-FJyGoA',
-  );
+  url: 'https://zakvowocgunowgxxslqm.supabase.co',
+  anonKey: 'sb_publishable_CPIzdsRFAy_8hPYucVkcTA_T-FJyGoA',
+  authOptions: const FlutterAuthClientOptions(
+    authFlowType: AuthFlowType.implicit,
+  ),
+);
 
   runApp(const MyApp());
 }
@@ -46,13 +60,11 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'Time Tracker',
-          themeMode:
-              dark ? ThemeMode.dark : ThemeMode.light,
+          themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           theme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.light,
-            scaffoldBackgroundColor:
-                const Color(0xFFF8FAFC),
+            scaffoldBackgroundColor: const Color(0xFFF8FAFC),
             primaryColor: const Color(0xFFF97316),
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFFF97316),
@@ -63,8 +75,7 @@ class MyApp extends StatelessWidget {
           darkTheme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.dark,
-            scaffoldBackgroundColor:
-                const Color(0xFF0F172A),
+            scaffoldBackgroundColor: const Color(0xFF0F172A),
             primaryColor: const Color(0xFFF97316),
             colorScheme: ColorScheme.fromSeed(
               seedColor: const Color(0xFFF97316),
@@ -73,8 +84,8 @@ class MyApp extends StatelessWidget {
             fontFamily: 'Segoe UI',
           ),
           home: const SplashScreen(
-  nextScreen: AuthGate(),
-),
+            nextScreen: AuthGate(),
+          ),
         );
       },
     );
@@ -94,52 +105,115 @@ class _AuthGateState extends State<AuthGate> {
   bool sessionExpired = false;
   bool resetScreenOpen = false;
   bool invitationScreenOpen = false;
+  bool passwordRecoveryActive = false;
 
   StreamSubscription<AuthState>? authSubscription;
+  late final AppLinks appLinks;
+  StreamSubscription<Uri>? appLinksSubscription;
 
   @override
   void initState() {
     super.initState();
 
+    appLinks = AppLinks();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+  try {
+    Uri? initialUri;
+
+    if (kIsWeb) {
+      // Process Supabase invite/recovery authentication on Flutter Web.
+      initialUri = Uri.base;
+      debugPrint('Processing web authentication URL: $initialUri');
+    } else {
+      // Process desktop custom deep links such as timetracker://...
+      initialUri = startupDeepLink ?? await appLinks.getInitialLink();
+      startupDeepLink = null;
+
+      if (initialUri != null && initialUri.scheme != 'timetracker') {
+        initialUri = null;
+      }
+    }
+
+    if (initialUri != null) {
+      try {
+        await supabase.auth.getSessionFromUrl(initialUri);
+      } catch (error) {
+        debugPrint('Session URL processing result: $error');
+      }
+    }
+
+    if (!mounted) return;
+
+    await checkSession();
+  } catch (error) {
+    debugPrint('Initial authentication link error: $error');
+  }
+});
+
+    appLinksSubscription = appLinks.uriLinkStream.listen(
+      (Uri uri) async {
+        debugPrint('Incoming deep link: $uri');
+
+        if (uri.scheme != 'timetracker') return;
+
+        try {
+          await supabase.auth.getSessionFromUrl(uri);
+
+          if (!mounted) return;
+
+          await checkSession();
+        } catch (error) {
+          debugPrint('Deep-link authentication error: $error');
+        }
+      },
+      onError: (Object error) {
+        debugPrint('Deep-link stream error: $error');
+      },
+    );
+
     HardwareKeyboard.instance.addHandler(
       _handleKeyboardActivity,
     );
 
-    authSubscription =
-        supabase.auth.onAuthStateChange.listen(
-      (authData) {
+    final currentUri = Uri.base;
+
+    passwordRecoveryActive =
+        currentUri.queryParameters['type'] == 'recovery' ||
+        currentUri.fragment.contains('type=recovery');
+
+    authSubscription = supabase.auth.onAuthStateChange.listen(
+      (authData) async {
         final event = authData.event;
 
         if (event == AuthChangeEvent.passwordRecovery) {
+          passwordRecoveryActive = true;
+
+          if (mounted) {
+            setState(() {
+              loading = false;
+              loggedIn = false;
+            });
+          }
+
           _openResetPasswordScreen();
           return;
         }
 
-        final user = authData.session?.user;
+        if (event == AuthChangeEvent.initialSession ||
+    event == AuthChangeEvent.signedIn ||
+    event == AuthChangeEvent.tokenRefreshed ||
+    event == AuthChangeEvent.userUpdated) {
+          if (!passwordRecoveryActive) {
+            await checkSession();
+          }
 
-        final metadata =
-            user?.userMetadata ?? <String, dynamic>{};
-
-        final invitationCompleted =
-            metadata['invitation_completed'] == true;
-
-        final hasWorkspaceInvitation =
-            metadata['workspace_id'] != null;
-
-        if (event == AuthChangeEvent.signedIn &&
-            hasWorkspaceInvitation &&
-            !invitationCompleted) {
-          _openInvitationScreen();
           return;
         }
 
-        if (event == AuthChangeEvent.signedIn ||
-            event == AuthChangeEvent.tokenRefreshed ||
-            event == AuthChangeEvent.userUpdated) {
-          checkSession();
-        }
-
         if (event == AuthChangeEvent.signedOut) {
+          passwordRecoveryActive = false;
+
           SessionTimeoutService.instance.stop();
 
           _clearCurrentUser();
@@ -164,7 +238,23 @@ class _AuthGateState extends State<AuthGate> {
       },
     );
 
-    checkSession();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) async {
+        if (!mounted) return;
+
+        if (passwordRecoveryActive) {
+          setState(() {
+            loading = false;
+            loggedIn = false;
+          });
+
+          _openResetPasswordScreen();
+          return;
+        }
+
+        await checkSession();
+      },
+    );
   }
 
   void _openResetPasswordScreen() {
@@ -179,14 +269,33 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
 
-        await Navigator.of(context).push(
+        await Navigator.of(context).push<bool>(
           MaterialPageRoute(
-            builder: (_) =>
-                const ResetPasswordScreen(),
+            builder: (_) => const ResetPasswordScreen(),
           ),
         );
 
         resetScreenOpen = false;
+        passwordRecoveryActive = false;
+
+        if (!mounted) return;
+
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          debugPrint(
+            'Password recovery sign-out error: $error',
+          );
+        }
+
+        _clearCurrentUser();
+
+        if (!mounted) return;
+
+        setState(() {
+          loggedIn = false;
+          loading = false;
+        });
       },
     );
   }
@@ -203,11 +312,9 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
 
-        final completed =
-            await Navigator.of(context).push<bool>(
+        final completed = await Navigator.of(context).push<bool>(
           MaterialPageRoute(
-            builder: (_) =>
-                const AcceptInvitationScreen(),
+            builder: (_) => const AcceptInvitationScreen(),
           ),
         );
 
@@ -267,7 +374,13 @@ class _AuthGateState extends State<AuthGate> {
 
     sessionExpired = true;
 
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      debugPrint(
+        'Session timeout sign-out error: $error',
+      );
+    }
 
     _clearCurrentUser();
 
@@ -307,6 +420,18 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> checkSession() async {
+    if (passwordRecoveryActive) {
+      if (!mounted) return;
+
+      setState(() {
+        loggedIn = false;
+        loading = false;
+      });
+
+      _openResetPasswordScreen();
+      return;
+    }
+
     final user = supabase.auth.currentUser;
 
     if (user == null || user.email == null) {
@@ -324,29 +449,6 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
 
-    final metadata =
-        user.userMetadata ?? <String, dynamic>{};
-
-    final invitationCompleted =
-        metadata['invitation_completed'] == true;
-
-    final hasWorkspaceInvitation =
-        metadata['workspace_id'] != null;
-
-    if (hasWorkspaceInvitation &&
-        !invitationCompleted) {
-      if (!mounted) return;
-
-      setState(() {
-        loading = false;
-        loggedIn = false;
-      });
-
-      _openInvitationScreen();
-
-      return;
-    }
-
     if (mounted) {
       setState(() {
         loading = true;
@@ -354,7 +456,19 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     try {
-      final email = user.email!.toLowerCase();
+      final email = user.email!.trim().toLowerCase();
+
+      final metadata =
+          user.userMetadata ?? <String, dynamic>{};
+
+      final invitationCompleted =
+          metadata['invitation_completed'] == true;
+
+      final invitationWorkspaceId =
+          metadata['workspace_id']?.toString().trim() ?? '';
+
+      final hasWorkspaceInvitation =
+          invitationWorkspaceId.isNotEmpty;
 
       final profile = await supabase
           .from('profiles')
@@ -363,19 +477,93 @@ class _AuthGateState extends State<AuthGate> {
             'approval_status, is_active',
           )
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
-      final approvalStatus = profile['approval_status']
-              ?.toString()
-              .toLowerCase() ??
-          '';
+      if (passwordRecoveryActive) {
+        if (!mounted) return;
 
-      final isActive =
-          profile['is_active'] == true;
+        setState(() {
+          loggedIn = false;
+          loading = false;
+        });
 
-      if (approvalStatus != 'approved' ||
-          !isActive) {
-        await supabase.auth.signOut();
+        _openResetPasswordScreen();
+        return;
+      }
+
+      if (profile == null &&
+    hasWorkspaceInvitation &&
+    !invitationCompleted) {
+  SessionTimeoutService.instance.stop();
+  _clearCurrentUser();
+
+  if (!mounted) return;
+
+  setState(() {
+    loggedIn = false;
+    loading = false;
+  });
+
+  _openInvitationScreen();
+  return;
+}
+
+if (profile == null) {
+  throw Exception(
+    'No profile exists for this account.',
+  );
+}
+
+      final profileRole =
+          profile['role']?.toString().trim().toLowerCase() ?? '';
+
+      final resolvedRole =
+          profileRole.isNotEmpty ? profileRole : 'employee';
+
+      /*
+       * The invitation screen must only appear for employees.
+       *
+       * Admins with workspace metadata must always continue
+       * through the normal account checks and dashboard flow.
+       */
+      final shouldOpenInvitation =
+          resolvedRole == 'employee' &&
+          hasWorkspaceInvitation &&
+          !invitationCompleted;
+
+      if (shouldOpenInvitation) {
+        SessionTimeoutService.instance.stop();
+
+        _clearCurrentUser();
+
+        if (!mounted) return;
+
+        setState(() {
+          loggedIn = false;
+          loading = false;
+        });
+
+        _openInvitationScreen();
+        return;
+      }
+
+      final approvalStatus =
+          profile['approval_status']
+                  ?.toString()
+                  .trim()
+                  .toLowerCase() ??
+              '';
+
+      final isActive = profile['is_active'] == true;
+
+      if (approvalStatus != 'approved' || !isActive) {
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          debugPrint(
+            'Rejected account sign-out error: $error',
+          );
+        }
 
         _clearCurrentUser();
 
@@ -418,16 +606,10 @@ class _AuthGateState extends State<AuthGate> {
               ? profileName
               : email;
 
-      final profileRole =
-          profile['role']?.toString().trim();
-
-      currentUserRole =
-          profileRole != null && profileRole.isNotEmpty
-              ? profileRole
-              : 'employee';
+      currentUserRole = resolvedRole;
 
       currentWorkspaceId =
-          profile['workspace_id']?.toString() ?? '';
+          profile['workspace_id']?.toString().trim() ?? '';
 
       if (currentWorkspaceId.isEmpty) {
         throw Exception(
@@ -439,11 +621,16 @@ class _AuthGateState extends State<AuthGate> {
           .from('workspaces')
           .select('workspace_name')
           .eq('id', currentWorkspaceId)
-          .single();
+          .maybeSingle();
+
+      if (workspace == null) {
+        throw Exception(
+          'The user workspace could not be found.',
+        );
+      }
 
       currentWorkspaceName =
-          workspace['workspace_name']?.toString() ??
-              '';
+          workspace['workspace_name']?.toString().trim() ?? '';
 
       if (!mounted) return;
 
@@ -458,11 +645,29 @@ class _AuthGateState extends State<AuthGate> {
         'Unable to load account: $error',
       );
 
+      if (passwordRecoveryActive) {
+        if (!mounted) return;
+
+        setState(() {
+          loggedIn = false;
+          loading = false;
+        });
+
+        _openResetPasswordScreen();
+        return;
+      }
+
       SessionTimeoutService.instance.stop();
 
       _clearCurrentUser();
 
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch (signOutError) {
+        debugPrint(
+          'Account load failure sign-out error: $signOutError',
+        );
+      }
 
       if (!mounted) return;
 
@@ -494,6 +699,7 @@ class _AuthGateState extends State<AuthGate> {
     SessionTimeoutService.instance.stop();
 
     authSubscription?.cancel();
+    appLinksSubscription?.cancel();
 
     HardwareKeyboard.instance.removeHandler(
       _handleKeyboardActivity,

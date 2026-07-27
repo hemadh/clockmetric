@@ -46,6 +46,7 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   Map<String, dynamic>? runningEntry;
 
   final Set<String> expandedDateGroups = <String>{};
+  final Set<String> expandedEmployeeGroups = <String>{};
 
   bool get isAdmin =>
       currentUserRole.trim().toLowerCase() == 'admin';
@@ -286,6 +287,22 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
 
     return groups;
   }
+
+  Map<String, List<Map<String, dynamic>>> groupByEmployee(
+  List<Map<String, dynamic>> entries,
+) {
+  final groups = <String, List<Map<String, dynamic>>>{};
+
+  for (final entry in entries) {
+    final employee =
+        entry['employee_name']?.toString() ?? 'Employee';
+
+    groups.putIfAbsent(employee, () => []);
+    groups[employee]!.add(entry);
+  }
+
+  return groups;
+}
 
   Duration durationForEntries(
     List<Map<String, dynamic>> entries,
@@ -794,7 +811,10 @@ Widget buildDateGroup(
           ),
         ),
       ),
-      if (expanded) ...entries.map(buildTimeEntryRow),
+      if (expanded)
+  ...(isAdmin
+      ? buildEmployeeGroups(groupKey, entries)
+      : entries.map(buildTimeEntryRow)),
       const Divider(
         height: 1,
         thickness: 1,
@@ -802,6 +822,133 @@ Widget buildDateGroup(
       ),
     ],
   );
+}
+
+
+List<Widget> buildEmployeeGroups(
+  String dayKey,
+  List<Map<String, dynamic>> entries,
+) {
+  final grouped = groupByEmployee(entries);
+
+  final employeeGroups = grouped.entries.toList();
+
+employeeGroups.sort((a, b) {
+  final aTotal = durationForEntries(a.value);
+  final bTotal = durationForEntries(b.value);
+
+  return bTotal.compareTo(aTotal);
+});
+
+return employeeGroups.map((employeeGroup) {
+    final employee = employeeGroup.key;
+    final employeeEntries = employeeGroup.value;
+
+    final employeeKey = '$dayKey-$employee';
+
+    final expanded =
+        expandedEmployeeGroups.contains(employeeKey);
+
+    final total = durationForEntries(employeeEntries);
+
+    return Column(
+      children: [
+
+        InkWell(
+          onTap: () {
+            setState(() {
+              if (expanded) {
+                expandedEmployeeGroups.remove(employeeKey);
+              } else {
+                expandedEmployeeGroups.add(employeeKey);
+              }
+            });
+          },
+
+          child: Container(
+            color: Colors.white,
+            padding: const EdgeInsets.only(
+              left: 45,
+              right: 20,
+              top: 14,
+              bottom: 14,
+            ),
+
+            child: Row(
+              children: [
+
+                Icon(
+                  expanded
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_right,
+                  color: orange,
+                ),
+
+                const SizedBox(width: 8),
+
+                Container(
+  width: 10,
+  height: 10,
+  decoration: BoxDecoration(
+    color: employeeEntries.any((e) => e['end_time'] == null)
+        ? Colors.green
+        : Colors.red,
+    shape: BoxShape.circle,
+  ),
+),
+
+const SizedBox(width: 10),
+
+                Expanded(
+  child: Row(
+    children: [
+      Text(
+        employeeEntries.any((e) => e['end_time'] == null)
+            ? 'Working'
+            : 'Offline',
+        style: TextStyle(
+          color: employeeEntries.any((e) => e['end_time'] == null)
+              ? Colors.green
+              : Colors.red,
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+        ),
+      ),
+
+      const SizedBox(width: 8),
+
+      Expanded(
+        child: Text(
+          employee,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: darkText,
+          ),
+        ),
+      ),
+    ],
+  ),
+),
+
+                Text(
+                  formatClockDuration(total),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: darkText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        if (expanded)
+          ...employeeEntries.map(buildTimeEntryRow),
+      ],
+    );
+  }).toList();
 }
 
  Widget buildTimeEntryRow(
@@ -880,28 +1027,83 @@ Widget buildDateGroup(
           ),
         ),
         Expanded(
-          flex: 2,
-          child: Text(
-            '$start - $end',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: secondaryText,
-              fontSize: 14,
-            ),
+  flex: 2,
+  child: Text(
+    '$start - $end',
+    textAlign: TextAlign.center,
+    style: const TextStyle(
+      color: secondaryText,
+      fontSize: 14,
+    ),
+  ),
+),
+
+SizedBox(
+  width: 100,
+  child: Text(
+    formatClockDuration(duration),
+    textAlign: TextAlign.right,
+    style: const TextStyle(
+      color: darkText,
+      fontWeight: FontWeight.w600,
+      fontSize: 14,
+    ),
+  ),
+),
+
+if (entry['end_time'] != null) ...[
+  const SizedBox(width: 8),
+  PopupMenuButton<String>(
+    tooltip: 'Entry options',
+    icon: const Icon(
+      Icons.more_vert,
+      color: secondaryText,
+    ),
+    onSelected: (value) {
+      if (value == 'continue') {
+        debugPrint(
+          'Continue project: ${entry['project_id']}',
+        );
+      } else if (value == 'delete') {
+        debugPrint(
+          'Delete entry: ${entry['id']}',
+        );
+      }
+    },
+    itemBuilder: (context) {
+      return const [
+        PopupMenuItem<String>(
+          value: 'continue',
+          child: Row(
+            children: [
+              Icon(Icons.play_arrow_outlined),
+              SizedBox(width: 10),
+              Text('Continue'),
+            ],
           ),
         ),
-        SizedBox(
-          width: 100,
-          child: Text(
-            formatClockDuration(duration),
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              color: darkText,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
+        PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                color: Colors.red,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Delete',
+                style: TextStyle(
+                  color: Colors.red,
+                ),
+              ),
+            ],
           ),
         ),
+      ];
+    },
+  ),
+],
       ],
     ),
   );

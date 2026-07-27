@@ -556,6 +556,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       }
     }
   }
+
 Future<void> inviteEmployee() async {
   final name = inviteNameController.text.trim();
 
@@ -586,16 +587,29 @@ Future<void> inviteEmployee() async {
   });
 
   try {
-    final response = await supabase.functions.invoke(
-      'invite-workspace-member',
-      body: {
-        'full_name': name,
-        'email': email,
-        'role': inviteRole,
-        'workspace_id': currentWorkspaceId,
-        'redirect_to': 'timetracker://invite',
-      },
-    );
+    debugPrint('CALLING invite-workspace-member');
+   final session = supabase.auth.currentSession;
+
+if (session == null) {
+  throw Exception(
+    'Your login session has expired. Please log in again.',
+  );
+}
+
+final response = await supabase.functions.invoke(
+  'invite-workspace-member',
+  headers: {
+    'Authorization':
+        'Bearer ${session.accessToken}',
+  },
+  body: {
+    'full_name': name,
+    'email': email,
+    'role': 'employee',
+    'workspace_id': currentWorkspaceId,
+    'redirect_to': 'timetracker://invite',
+  },
+);
 
     final data = response.data;
 

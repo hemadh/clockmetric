@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
@@ -20,14 +21,17 @@ class TimesheetScreen extends StatefulWidget {
 class _TimesheetScreenState extends State<TimesheetScreen> {
   bool loading = true;
   bool loadingEmployees = false;
+  bool loadingTeamTime = false;
 
   String? errorMessage;
+  String? teamTimeErrorMessage;
   String? selectedEmployeeName;
 
   int weekOffset = 0;
 
   List<String> employees = [];
   List<Map<String, dynamic>> entries = [];
+  List<EmployeeWeeklyTime> weeklyTeamTimes = [];
 
   @override
   void initState() {
@@ -45,6 +49,10 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     }
 
     await loadTimesheet();
+
+    if (!widget.isManager) {
+      await loadWeeklyTeamTime();
+    }
   }
 
   DateTime getWeekStart() {
@@ -203,7 +211,74 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       });
     }
   }
+Future<void> loadWeeklyTeamTime() async {
+  if (widget.isManager || !mounted) return;
 
+  setState(() {
+    loadingTeamTime = true;
+    teamTimeErrorMessage = null;
+  });
+
+  try {
+    final response = await supabase.rpc(
+      'get_weekly_team_time',
+      params: {
+        'p_week_start': getWeekStart().toIso8601String(),
+        'p_week_end': getWeekEnd().toIso8601String(),
+      },
+    );
+
+    final loadedTeamTimes = <EmployeeWeeklyTime>[];
+
+    for (final rawItem in response as List<dynamic>) {
+      final item = Map<String, dynamic>.from(rawItem as Map);
+
+      final employeeName =
+          item['employee_name']?.toString().trim();
+
+      final totalMinutes = int.tryParse(
+            item['total_minutes']?.toString() ?? '',
+          ) ??
+          0;
+
+      if (employeeName == null ||
+          employeeName.isEmpty ||
+          totalMinutes <= 0) {
+        continue;
+      }
+
+      loadedTeamTimes.add(
+        EmployeeWeeklyTime(
+          employeeName: employeeName,
+          totalMinutes: totalMinutes,
+        ),
+      );
+    }
+
+    loadedTeamTimes.sort(
+      (first, second) => second.totalMinutes.compareTo(
+        first.totalMinutes,
+      ),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      weeklyTeamTimes = loadedTeamTimes;
+      loadingTeamTime = false;
+    });
+  } catch (error) {
+    debugPrint('Weekly team time loading error: $error');
+
+    if (!mounted) return;
+
+    setState(() {
+      loadingTeamTime = false;
+      teamTimeErrorMessage =
+          'Unable to load weekly team time.';
+    });
+  }
+}
   int entryMinutes(Map<String, dynamic> entry) {
     final storedMinutes = int.tryParse(
       entry['duration_minutes']?.toString() ?? '',
@@ -415,12 +490,20 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     return days[weekday - 1];
   }
 
+  Future<void> refreshTimesheetScreen() async {
+  await loadTimesheet();
+
+  if (!widget.isManager) {
+    await loadWeeklyTeamTime();
+  }
+}
+
   void goToPreviousWeek() {
     setState(() {
       weekOffset--;
     });
 
-    loadTimesheet();
+    refreshTimesheetScreen();
   }
 
   void goToNextWeek() {
@@ -430,7 +513,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       weekOffset++;
     });
 
-    loadTimesheet();
+    refreshTimesheetScreen();
   }
 
   void goToCurrentWeek() {
@@ -440,7 +523,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       weekOffset = 0;
     });
 
-    loadTimesheet();
+    refreshTimesheetScreen();
   }
 
   void showDayDetails({
@@ -674,7 +757,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: loading ? null : loadTimesheet,
+            onPressed: loading ? null : refreshTimesheetScreen,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -689,7 +772,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
               ? buildErrorState()
               : RefreshIndicator(
                   color: AppColors.primary,
-                  onRefresh: loadTimesheet,
+                  onRefresh: refreshTimesheetScreen,
                   child: ListView(
                     physics:
                         const AlwaysScrollableScrollPhysics(),
@@ -716,6 +799,10 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
                               projectRows,
                               dailyTotals,
                             ),
+                      if (!widget.isManager) ...[
+                        const SizedBox(height: 24),
+                        buildWeeklyTeamTimeSection(),
+                      ],
                     ],
                   ),
                 ),
@@ -1215,6 +1302,292 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     );
   }
 
+  Widget buildWeeklyTeamTimeSection() {
+    final teamTotalMinutes = weeklyTeamTimes.fold<int>(
+      0,
+      (total, employee) => total + employee.totalMinutes,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppColors.border,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0D000000),
+            blurRadius: 18,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.donut_large_outlined,
+                color: AppColors.primary,
+                size: 25,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Weekly Team Time',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Total time worked by your team for ${weekTitle().toLowerCase()}.',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 22),
+          if (loadingTeamTime)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 42),
+                child: CircularProgressIndicator(
+                  color: AppColors.primary,
+                ),
+              ),
+            )
+          else if (teamTimeErrorMessage != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.cloud_off_outlined,
+                      color: AppColors.danger,
+                      size: 40,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      teamTimeErrorMessage!,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: loadWeeklyTeamTime,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (weeklyTeamTimes.isEmpty)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 38),
+                child: Text(
+                  'No team time recorded for this week.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useVerticalLayout = constraints.maxWidth < 760;
+                final chart = buildWeeklyTeamDonut(
+                  teamTotalMinutes,
+                );
+                final legend = buildWeeklyTeamLegend();
+
+                if (useVerticalLayout) {
+                  return Column(
+                    children: [
+                      chart,
+                      const SizedBox(height: 25),
+                      legend,
+                    ],
+                  );
+                }
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: legend),
+                    const SizedBox(width: 32),
+                    chart,
+                  ],
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildWeeklyTeamDonut(int teamTotalMinutes) {
+    return SizedBox(
+      width: 290,
+      height: 290,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          PieChart(
+            PieChartData(
+              startDegreeOffset: -90,
+              centerSpaceRadius: 76,
+              sectionsSpace: 3,
+              borderData: FlBorderData(show: false),
+              sections: List.generate(
+                weeklyTeamTimes.length,
+                (index) {
+                  final employee = weeklyTeamTimes[index];
+                  final isCurrentEmployee = employee.employeeName
+                          .trim()
+                          .toLowerCase() ==
+                      currentUserName.trim().toLowerCase();
+
+                  return PieChartSectionData(
+                    value: employee.totalMinutes.toDouble(),
+                    color: teamChartColor(index),
+                    radius: isCurrentEmployee ? 61 : 52,
+                    showTitle: false,
+                    badgePositionPercentageOffset: 1.1,
+                  );
+                },
+              ),
+            ),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutCubic,
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                formatDuration(teamTotalMinutes),
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 25,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'TEAM TOTAL',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildWeeklyTeamLegend() {
+    return Column(
+      children: List.generate(
+        weeklyTeamTimes.length,
+        (index) {
+          final employee = weeklyTeamTimes[index];
+          final isCurrentEmployee = employee.employeeName
+                  .trim()
+                  .toLowerCase() ==
+              currentUserName.trim().toLowerCase();
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 13,
+            ),
+            decoration: BoxDecoration(
+              color: isCurrentEmployee
+                  ? AppColors.primarySurface
+                  : AppColors.background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isCurrentEmployee
+                    ? AppColors.primaryLight
+                    : AppColors.border,
+                width: isCurrentEmployee ? 1.4 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 13,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: teamChartColor(index),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Text(
+                    isCurrentEmployee
+                        ? '${employee.employeeName} (You)'
+                        : employee.employeeName,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: isCurrentEmployee
+                          ? FontWeight.bold
+                          : FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  formatDuration(employee.totalMinutes),
+                  style: TextStyle(
+                    color: isCurrentEmployee
+                        ? AppColors.primary
+                        : AppColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Color teamChartColor(int index) {
+    const colors = [
+      Color(0xFFFF6B00),
+      Color(0xFF2478C9),
+      Color(0xFF65A030),
+      Color(0xFF8B5CF6),
+      Color(0xFFE5484D),
+      Color(0xFF0F9D8A),
+      Color(0xFFE5A000),
+      Color(0xFF64748B),
+    ];
+
+    return colors[index % colors.length];
+  }
+
   Widget buildEmptyState() {
     return Container(
       width: double.infinity,
@@ -1295,6 +1668,16 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       ),
     );
   }
+}
+
+class EmployeeWeeklyTime {
+  final String employeeName;
+  final int totalMinutes;
+
+  const EmployeeWeeklyTime({
+    required this.employeeName,
+    required this.totalMinutes,
+  });
 }
 
 class ProjectTimesheetRow {

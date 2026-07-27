@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -331,19 +333,21 @@ static const textMuted = Color(0xFF9CA3AF);
                   );
                 }
 
-                await supabase
-                    .from('pending_employees')
-                    .insert({
-                  'full_name': name,
-                  'email': email,
-                  'role': role,
-                  'status': 'pending_auth',
-                  'workspace_id':
-                      currentWorkspaceId,
-                  'created_by': currentUserId,
-                  'required_weekly_hours':
-                      hours,
-                });
+                final response = await supabase.functions.invoke(
+  'invite-workspace-member',
+  body: {
+    'full_name': name,
+    'email': email,
+    'role': role,
+    'workspace_id': currentWorkspaceId,
+  },
+);
+
+final data = response.data;
+
+if (data is Map && data['error'] != null) {
+  throw Exception(data['error'].toString());
+}
 
                 if (dialogContext.mounted) {
                   Navigator.of(dialogContext)
@@ -1221,7 +1225,7 @@ static const textMuted = Color(0xFF9CA3AF);
                           ? const Color(
                               0xFF7C3AED,
                             )
-                          :const Color(0xFF2563EB)
+                          :primary,
                     ),
                   ],
                 ),
@@ -1361,6 +1365,305 @@ static const textMuted = Color(0xFF9CA3AF);
     );
   }
 
+  Widget _employeeWorkChart(
+  List<Map<String, dynamic>> visibleEmployees,
+) {
+  final chartEmployees = visibleEmployees.where((employee) {
+    final id = employee['id']?.toString() ?? '';
+
+    return (weeklyMinutes[id] ?? 0) > 0;
+  }).toList();
+
+  final totalMinutes = chartEmployees.fold<int>(
+    0,
+    (total, employee) {
+      final id = employee['id']?.toString() ?? '';
+
+      return total + (weeklyMinutes[id] ?? 0);
+    },
+  );
+
+  const chartColors = <Color>[
+    Color(0xFF5B6CC1),
+    Color(0xFF9B7B6E),
+    Color(0xFF2878C8),
+    Color(0xFF67A437),
+    Color(0xFFFF5622),
+    Color(0xFFF0A72E),
+    Color(0xFF8B5CF6),
+    Color(0xFF0F9D8A),
+  ];
+
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 25),
+    decoration: BoxDecoration(
+      color: surface,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: border),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x0D000000),
+          blurRadius: 20,
+          offset: Offset(0, 8),
+        ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 15,
+          ),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(16),
+            ),
+          ),
+          child: const Text(
+            'Employee Work Distribution — This Week',
+            style: TextStyle(
+              color: textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        if (chartEmployees.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 42,
+            ),
+            child: Center(
+              child: Text(
+                'No employee time entries found for this week.',
+                style: TextStyle(
+                  color: textSecondary,
+                ),
+              ),
+            ),
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 850;
+
+              final legend = _employeeChartLegend(
+                chartEmployees,
+                chartColors,
+                totalMinutes,
+              );
+
+              final chart = SizedBox(
+                width: compact ? 320 : 430,
+                height: 390,
+                child: Center(
+                  child: SizedBox(
+                    width: 285,
+                    height: 285,
+                    child: CustomPaint(
+                      painter: _EmployeeDonutPainter(
+                        values: chartEmployees.map((employee) {
+                          final id =
+                              employee['id']?.toString() ?? '';
+
+                          return weeklyMinutes[id] ?? 0;
+                        }).toList(),
+                        colors: chartColors,
+                        holeFraction: 0.50,
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _formatClockDuration(
+                                totalMinutes,
+                              ),
+                              style: const TextStyle(
+                                color: textPrimary,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Total',
+                              style: TextStyle(
+                                color: textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+
+              if (compact) {
+                return Column(
+                  children: [
+                    chart,
+                    const Divider(height: 1),
+                    legend,
+                  ],
+                );
+              }
+
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: legend,
+                    ),
+                    const VerticalDivider(width: 1),
+                    chart,
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
+    ),
+  );
+}
+
+Widget _employeeChartLegend(
+  List<Map<String, dynamic>> chartEmployees,
+  List<Color> colors,
+  int totalMinutes,
+) {
+  return Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      children: [
+        const Row(
+          children: [
+            Expanded(
+              child: Text(
+                'EMPLOYEE',
+                style: TextStyle(
+                  color: textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Text(
+              'DURATION',
+              style: TextStyle(
+                color: textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Divider(height: 1),
+        ...List.generate(
+          chartEmployees.length,
+          (index) {
+            final employee = chartEmployees[index];
+
+            final id =
+                employee['id']?.toString() ?? '';
+
+            final minutes =
+                weeklyMinutes[id] ?? 0;
+
+            final percentage = totalMinutes == 0
+                ? 0.0
+                : (minutes / totalMinutes) * 100;
+
+            return Container(
+              padding: const EdgeInsets.symmetric(
+                vertical: 13,
+              ),
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: Color(0xFFE5E7EB),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color:
+                          colors[index % colors.length],
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          employee['full_name']
+                                  ?.toString() ??
+                              'Employee',
+                          overflow:
+                              TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: textPrimary,
+                            fontSize: 15,
+                            fontWeight:
+                                FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${percentage.toStringAsFixed(1)}% of total',
+                          style: const TextStyle(
+                            color: textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Text(
+                    _formatClockDuration(minutes),
+                    style: const TextStyle(
+                      color: textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+String _formatClockDuration(int minutes) {
+  final hours = minutes ~/ 60;
+  final mins = minutes % 60;
+
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${mins.toString().padLeft(2, '0')}:00';
+}
+
   Widget _pendingCard(
     Map<String, dynamic> employee,
   ) {
@@ -1432,7 +1735,7 @@ static const textMuted = Color(0xFF9CA3AF);
           FilledButton(
             style:
                 FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1D4ED8),
+              backgroundColor: primary,
             ),
             onPressed: actionLoading
                 ? null
@@ -1944,6 +2247,9 @@ static const textMuted = Color(0xFF9CA3AF);
                           height: 25,
                         ),
                       ],
+                      _employeeWorkChart(visible),
+
+const SizedBox(height: 24),
                       Text(
                         'Employees (${visible.length})',
                         style:
@@ -1983,5 +2289,79 @@ static const textMuted = Color(0xFF9CA3AF);
                   ),
                 ),
     );
+  }
+}
+
+class _EmployeeDonutPainter extends CustomPainter {
+  const _EmployeeDonutPainter({
+    required this.values,
+    required this.colors,
+    this.holeFraction = 0.5,
+  });
+
+  final List<int> values;
+  final List<Color> colors;
+  final double holeFraction;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = values.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+
+    if (total <= 0) return;
+
+    final center = Offset(
+      size.width / 2,
+      size.height / 2,
+    );
+
+    final radius = math.min(size.width, size.height) / 2;
+    final strokeWidth = radius * (1 - holeFraction);
+    final arcRadius = radius - (strokeWidth / 2);
+
+    final rect = Rect.fromCircle(
+      center: center,
+      radius: arcRadius,
+    );
+
+    var startAngle = -math.pi / 2;
+    const gap = 0.012;
+
+    for (var index = 0; index < values.length; index++) {
+      final value = values[index];
+
+      if (value <= 0) continue;
+
+      final sweep = (value / total) * math.pi * 2;
+
+      final paint = Paint()
+        ..color = colors[index % colors.length]
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.butt;
+
+      final adjustedSweep = math.max(0.0, sweep - gap);
+
+      canvas.drawArc(
+        rect,
+        startAngle + (gap / 2),
+        adjustedSweep,
+        false,
+        paint,
+      );
+
+      startAngle += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant _EmployeeDonutPainter oldDelegate,
+  ) {
+    return oldDelegate.values != values ||
+        oldDelegate.colors != colors ||
+        oldDelegate.holeFraction != holeFraction;
   }
 }

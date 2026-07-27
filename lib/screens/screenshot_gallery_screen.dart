@@ -32,6 +32,9 @@ class _ScreenshotGalleryScreenState
   );
 
   List<Map<String, dynamic>> screenshots = [];
+  List<String> employees = ['All Employees'];
+
+String selectedEmployee = 'All Employees';
 
   final Map<String, Future<Uint8List?>> _imageFutures = {};
 
@@ -113,11 +116,28 @@ class _ScreenshotGalleryScreenState
 
       if (!mounted) return;
 
-      setState(() {
-        screenshots =
-            List<Map<String, dynamic>>.from(response);
-        loading = false;
-      });
+      final loadedScreenshots =
+    List<Map<String, dynamic>>.from(response);
+
+final employeeNames = loadedScreenshots
+    .map(
+      (e) => (e['employee_name'] ?? 'Employee')
+          .toString(),
+    )
+    .toSet()
+    .toList()
+  ..sort();
+
+setState(() {
+  screenshots = loadedScreenshots;
+
+  employees = [
+    'All Employees',
+    ...employeeNames,
+  ];
+
+  loading = false;
+});
     } catch (error) {
       debugPrint(
         'Failed to load screenshots: $error',
@@ -928,6 +948,44 @@ class _ScreenshotGalleryScreenState
               ),
             ),
           ),
+          const SizedBox(width: 20),
+
+SizedBox(
+  width: 220,
+  child: DropdownButtonFormField<String>(
+    value: selectedEmployee,
+    decoration: InputDecoration(
+      labelText: 'Employee',
+      filled: true,
+      fillColor: background,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: borderColor),
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 12,
+      ),
+    ),
+    items: employees
+        .map(
+          (employee) => DropdownMenuItem<String>(
+            value: employee,
+            child: Text(employee),
+          ),
+        )
+        .toList(),
+    onChanged: (value) {
+      setState(() {
+        selectedEmployee = value!;
+      });
+    },
+  ),
+),
           IconButton(
             tooltip: 'Next day',
             onPressed:
@@ -943,8 +1001,21 @@ class _ScreenshotGalleryScreenState
 
   @override
   Widget build(BuildContext context) {
-    final employeeGroups =
-        groupByEmployee();
+    Map<String, List<Map<String, dynamic>>> employeeGroups;
+
+if (selectedEmployee == 'All Employees') {
+  employeeGroups = groupByEmployee();
+} else {
+  employeeGroups = {
+    selectedEmployee: screenshots
+        .where(
+          (e) =>
+              (e['employee_name'] ?? '').toString() ==
+              selectedEmployee,
+        )
+        .toList(),
+  };
+}
 
     return Scaffold(
       backgroundColor: background,

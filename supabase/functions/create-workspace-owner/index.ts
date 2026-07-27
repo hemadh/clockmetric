@@ -231,10 +231,12 @@ Deno.serve(async (req: Request) => {
       } = await adminClient
         .from("workspaces")
         .insert({
-          workspace_name:
-              workspaceName,
-          created_by: userId,
-        })
+  workspace_name: workspaceName,
+  owner_email: email,
+  owner_name: fullName,
+  invite_code_enabled: true,
+  session_timeout_minutes: 60,
+})
         .select(
           "id, workspace_name",
         )
@@ -324,7 +326,7 @@ Deno.serve(async (req: Request) => {
         error,
       );
 
-      if (workspaceId.isNotEmpty) {
+      if (workspaceId.length > 0) {
         await adminClient
           .from("workspaces")
           .delete()

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:encrypt/encrypt.dart' as encrypt;
 
 import '../main.dart';
-import 'screenshot_capture_service.dart';
+import 'screenshot_capture_desktop.dart';
 
 class ScreenshotSchedulerService {
   static final ScreenshotSchedulerService instance =

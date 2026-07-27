@@ -12,6 +12,9 @@ dependencies:
     sdk: flutter
 
   supabase_flutter: ^2.12.1
+  app_links: ^7.2.1
+  win32_registry: ^3.0.3
+ 
   cupertino_icons: ^1.0.8
   fl_chart: ^1.2.0
   path_provider: ^2.1.5
