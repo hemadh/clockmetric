@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "floratime-a6886"
-  }
+  },
+  "targets": {
+    "floratime-a6886": {
+      "hosting": {
+        "clockmetric": [
+          "clockmetric"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

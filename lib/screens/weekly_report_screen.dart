@@ -38,6 +38,30 @@ class _WeeklyReportScreenState
     super.initState();
     loadReports();
   }
+  int _entryDurationSeconds(Map<String, dynamic> item) {
+  final start = DateTime.tryParse(
+    item['start_time']?.toString() ?? '',
+  );
+
+  final end = item['end_time'] == null
+      ? DateTime.now()
+      : DateTime.tryParse(
+          item['end_time'].toString(),
+        );
+
+  if (start != null &&
+      end != null &&
+      !end.isBefore(start)) {
+    return end.difference(start).inSeconds;
+  }
+
+  final storedMinutes = int.tryParse(
+        item['duration_minutes']?.toString() ?? '',
+      ) ??
+      0;
+
+  return storedMinutes * 60;
+}
 
   Future<void> loadReports() async {
     if (!mounted) return;
@@ -64,46 +88,39 @@ class _WeeklyReportScreenState
           newDailyTotals = {};
 
       for (final item in employeeData) {
-        final employee =
-            item['employee_name']?.toString().trim();
+  final employee =
+      item['employee_name']?.toString().trim();
 
-        final employeeName =
-            employee == null || employee.isEmpty
-                ? 'Unknown Employee'
-                : employee;
+  final employeeName =
+      employee == null || employee.isEmpty
+          ? 'Unknown Employee'
+          : employee;
 
-        final minutes = int.tryParse(
-              item['duration_minutes']?.toString() ?? '',
-            ) ??
-            0;
+  final seconds = _entryDurationSeconds(item);
 
-        newEmployeeTotals[employeeName] =
-            (newEmployeeTotals[employeeName] ?? 0) +
-                minutes;
-      }
+  newEmployeeTotals[employeeName] =
+      (newEmployeeTotals[employeeName] ?? 0) +
+          seconds;
+}
 
       for (final item in projectData) {
-        final projectName =
-            item['projects']?['project_name']
-                    ?.toString()
-                    .trim() ??
-                '';
+  final projectName =
+      item['projects']?['project_name']
+              ?.toString()
+              .trim() ??
+          '';
 
-        final displayProject =
-            projectName.isEmpty
-                ? 'Unknown Project'
-                : projectName;
+  final displayProject =
+      projectName.isEmpty
+          ? 'Unknown Project'
+          : projectName;
 
-        final minutes = int.tryParse(
-              item['duration_minutes']?.toString() ?? '',
-            ) ??
-            0;
+  final seconds = _entryDurationSeconds(item);
 
-        newProjectTotals[displayProject] =
-            (newProjectTotals[displayProject] ?? 0) +
-                minutes;
-      }
-
+  newProjectTotals[displayProject] =
+      (newProjectTotals[displayProject] ?? 0) +
+          seconds;
+}
       for (final item in weeklyEntries) {
         final employee =
             item['employee_name']?.toString().trim();
@@ -113,10 +130,7 @@ class _WeeklyReportScreenState
                 ? 'Unknown Employee'
                 : employee;
 
-        final minutes = int.tryParse(
-              item['duration_minutes']?.toString() ?? '',
-            ) ??
-            0;
+        final seconds = _entryDurationSeconds(item);
 
         final startTime = DateTime.tryParse(
           item['start_time']?.toString() ?? '',
@@ -141,10 +155,9 @@ class _WeeklyReportScreenState
           },
         );
 
-        newDailyTotals[employeeName]![dayName] =
-            (newDailyTotals[employeeName]![dayName] ??
-                    0) +
-                minutes;
+      newDailyTotals[employeeName]![dayName] =
+    (newDailyTotals[employeeName]![dayName] ?? 0) +
+        seconds;
       }
 
       final profiles = await supabase
@@ -179,7 +192,7 @@ class _WeeklyReportScreenState
             newEmployeeTotals[displayName] ?? 0;
 
         final requiredMinutes =
-            requiredHours * 60;
+    requiredHours * 60 * 60;
 
         final missingMinutes =
             workedMinutes < requiredMinutes
@@ -237,20 +250,15 @@ class _WeeklyReportScreenState
     }
   }
 
-  String formatHours(int minutes) {
-    final hours = minutes ~/ 60;
-    final mins = minutes % 60;
+  String formatHours(int seconds) {
+  final hours = seconds ~/ 3600;
+  final minutes = (seconds % 3600) ~/ 60;
+  final secs = seconds % 60;
 
-    if (hours == 0) {
-      return '$mins min';
-    }
-
-    if (mins == 0) {
-      return '$hours hr';
-    }
-
-    return '$hours hr $mins min';
-  }
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${minutes.toString().padLeft(2, '0')}:'
+      '${secs.toString().padLeft(2, '0')}';
+}
 
   int get totalMinutes {
     int total = 0;
@@ -831,6 +839,7 @@ class _WeeklyReportScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
@@ -940,9 +949,9 @@ class _WeeklyReportScreenState
                                         title:
                                             'Employees',
                                         value:
-                                            employeeTotals
-                                                .length
-                                                .toString(),
+                                            complianceRows
+    .length
+    .toString(),
                                       ),
                                     ),
                                     SizedBox(

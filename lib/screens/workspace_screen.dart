@@ -1984,6 +1984,7 @@ Widget build(BuildContext context) {
     backgroundColor: const Color(0xffF5F7FB),
 
     appBar: AppBar(
+      automaticallyImplyLeading: false,
       elevation: 0,
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.white,

@@ -884,6 +884,7 @@ class _LeaveApprovalScreenState extends State<LeaveApprovalScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,

@@ -9,7 +9,9 @@ class ReportService {
 
     var query = supabase
         .from('time_entries')
-        .select('employee_name, duration_minutes')
+        .select(
+  'employee_name, duration_minutes, start_time, end_time',
+)
         .eq('workspace_id', currentWorkspaceId)
         .gte('start_time', weekStart.toIso8601String());
 
@@ -30,7 +32,9 @@ class ReportService {
 
     var query = supabase
         .from('time_entries')
-        .select('duration_minutes, projects(project_name)')
+        .select(
+  'duration_minutes, start_time, end_time, projects(project_name)',
+)
         .eq('workspace_id', currentWorkspaceId)
         .gte('start_time', weekStart.toIso8601String());
 
@@ -54,8 +58,8 @@ class ReportService {
     var query = supabase
         .from('time_entries')
         .select(
-          'employee_name, duration_minutes, start_time, projects(project_name)',
-        )
+  'employee_name, duration_minutes, start_time, end_time, projects(project_name)',
+)
         .eq('workspace_id', currentWorkspaceId)
         .gte('start_time', weekStart.toIso8601String())
         .lt('start_time', weekEnd.toIso8601String());

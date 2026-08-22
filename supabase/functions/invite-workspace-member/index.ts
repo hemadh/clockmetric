@@ -235,9 +235,15 @@ Deno.serve(async (req: Request) => {
 
     if (invitationError) {
       console.error(
-        "Invitation email error:",
-        invitationError,
-      );
+  "Invitation email error details:",
+  JSON.stringify({
+    name: invitationError.name,
+    message: invitationError.message,
+    status: invitationError.status,
+    code: invitationError.code,
+    cause: invitationError.cause,
+  }),
+);
 
       return jsonResponse(
         {

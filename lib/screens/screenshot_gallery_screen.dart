@@ -1,8 +1,9 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import '../main.dart';
 
@@ -44,18 +45,24 @@ String selectedEmployee = 'All Employees';
   bool get isToday {
     final today = DateTime.now();
 
+final todayOnly = DateTime(
+  today.year,
+  today.month,
+  today.day,
+);
+
+final currentWeekStart = todayOnly.subtract(
+  Duration(days: todayOnly.weekday - 1),
+);
+
+final earliestScreenshotDate = currentWeekStart.subtract(
+  const Duration(days: 14),
+);
+
     return selectedDate.year == today.year &&
         selectedDate.month == today.month &&
         selectedDate.day == today.day;
   }
-
-  final _key = encrypt.Key.fromUtf8(
-    '12345678901234567890123456789012',
-  );
-
-  final _iv = encrypt.IV.fromUtf8(
-    '1234567890123456',
-  );
 
   @override
   void initState() {
@@ -152,57 +159,53 @@ setState(() {
       });
     }
   }
-
-  Future<Uint8List?> loadDecryptedImage(
-    String secureImagePath,
-  ) async {
-    if (secureImagePath.trim().isEmpty) {
-      return null;
-    }
-
-    try {
-      final signedUrl = await supabase.storage
-          .from('employee-screenshots')
-          .createSignedUrl(
-            secureImagePath,
-            60,
-          );
-
-      final encryptedData = await NetworkAssetBundle(
-        Uri.parse(signedUrl),
-      ).load('');
-
-      final encryptedBytes =
-          encryptedData.buffer.asUint8List(
-        encryptedData.offsetInBytes,
-        encryptedData.lengthInBytes,
-      );
-
-      final encrypter = encrypt.Encrypter(
-        encrypt.AES(
-          _key,
-          mode: encrypt.AESMode.cbc,
-        ),
-      );
-
-      final decryptedBytes = encrypter.decryptBytes(
-        encrypt.Encrypted(encryptedBytes),
-        iv: _iv,
-      );
-
-      return Uint8List.fromList(
-        decryptedBytes,
-      );
-    } catch (error) {
-      // Missing or expired files are silently hidden.
-      debugPrint(
-        'Screenshot unavailable for '
-        '$secureImagePath: $error',
-      );
-
-      return null;
-    }
+Future<Uint8List?> loadDecryptedImage(
+  String screenshotId,
+) async {
+  if (screenshotId.trim().isEmpty) {
+    return null;
   }
+
+  try {
+    final session = supabase.auth.currentSession;
+
+    if (session == null) {
+      debugPrint('No active Supabase session');
+      return null;
+    }
+
+    final response = await http.post(
+      Uri.parse(
+        'https://zakvowocgunowgxxslqm.supabase.co/'
+        'functions/v1/decrypt-screenshot',
+      ),
+      headers: {
+        'Authorization': 'Bearer ${session.accessToken}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'screenshot_id': screenshotId,
+      }),
+    );
+
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300) {
+      debugPrint(
+        'Screenshot function failed: '
+        '${response.statusCode} ${response.body}',
+      );
+      return null;
+    }
+
+    return response.bodyBytes;
+  } catch (error, stackTrace) {
+    debugPrint(
+      'Screenshot unavailable for $screenshotId: $error',
+    );
+    debugPrintStack(stackTrace: stackTrace);
+    return null;
+  }
+}
 
   Future<Uint8List?> _imageFutureFor(
     Map<String, dynamic> screenshot,
@@ -210,29 +213,43 @@ setState(() {
     final screenshotId =
         screenshot['id']?.toString() ?? '';
 
-    final path =
-        screenshot['secure_image_path']?.toString() ??
-            '';
-
-    final cacheKey = screenshotId.isNotEmpty
-        ? screenshotId
-        : path;
-
     return _imageFutures.putIfAbsent(
-      cacheKey,
-      () => loadDecryptedImage(path),
+      screenshotId,
+      () => loadDecryptedImage(screenshotId),
     );
   }
 
   void previousDay() {
-    setState(() {
-      selectedDate = selectedDate.subtract(
-        const Duration(days: 1),
-      );
-    });
+  final today = DateTime.now();
 
-    loadScreenshots();
+  final todayOnly = DateTime(
+    today.year,
+    today.month,
+    today.day,
+  );
+
+  final currentWeekStart = todayOnly.subtract(
+    Duration(days: todayOnly.weekday - 1),
+  );
+
+  final earliestScreenshotDate = currentWeekStart.subtract(
+    const Duration(days: 14),
+  );
+
+  final previousDate = selectedDate.subtract(
+    const Duration(days: 1),
+  );
+
+  if (previousDate.isBefore(earliestScreenshotDate)) {
+    return;
   }
+
+  setState(() {
+    selectedDate = previousDate;
+  });
+
+  loadScreenshots();
+}
 
   void nextDay() {
     if (isToday) return;
@@ -263,12 +280,24 @@ setState(() {
   Future<void> chooseDate() async {
     final today = DateTime.now();
 
+    final todayOnly = DateTime(
+  today.year,
+  today.month,
+  today.day,
+);
+
+final currentWeekStart = todayOnly.subtract(
+  Duration(days: todayOnly.weekday - 1),
+);
+
+final earliestScreenshotDate = currentWeekStart.subtract(
+  const Duration(days: 14),
+);
+
     final selected = await showDatePicker(
       context: context,
       initialDate: selectedDate,
-      firstDate: today.subtract(
-        const Duration(days: 365),
-      ),
+      firstDate: earliestScreenshotDate,
       lastDate: today,
       helpText: 'Select screenshot date',
     );
@@ -287,12 +316,18 @@ setState(() {
   }
 
   DateTime? parseCapturedAt(dynamic value) {
-    if (value == null) return null;
+  if (value == null) return null;
 
-    return DateTime.tryParse(
-      value.toString(),
-    )?.toLocal();
+  final parsed = DateTime.tryParse(
+    value.toString(),
+  );
+
+  if (parsed == null) {
+    return null;
   }
+
+  return parsed.toLocal();
+}
 
   String formatTime(dynamic value) {
     final date = parseCapturedAt(value);
@@ -301,8 +336,7 @@ setState(() {
       return '--:--';
     }
 
-    return '${date.hour.toString().padLeft(2, '0')}:'
-        '${date.minute.toString().padLeft(2, '0')}';
+   return DateFormat('h:mm a').format(date);
   }
 
   String selectedDateText() {
@@ -354,11 +388,21 @@ setState(() {
       return 'Unknown time';
     }
 
-    final startHour = date.hour;
-    final endHour = (date.hour + 1) % 24;
+   final localDate = date.toLocal();
 
-    return '${startHour.toString().padLeft(2, '0')}:00 - '
-        '${endHour.toString().padLeft(2, '0')}:00';
+final start = DateTime(
+  localDate.year,
+  localDate.month,
+  localDate.day,
+  localDate.hour,
+);
+
+final end = start.add(
+  const Duration(hours: 1),
+);
+
+return '${DateFormat('h a').format(start)} - '
+    '${DateFormat('h a').format(end)}';
   }
 
   String initials(String name) {
@@ -587,7 +631,7 @@ setState(() {
                             imageBytes,
                             width: 300,
                             height: 170,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             gaplessPlayback: true,
                           ),
                         ),
@@ -773,7 +817,7 @@ setState(() {
                 ),
               ),
               Text(
-                '${employeeScreenshots.length}',
+                '${screenshots.length} Screenshots',
                 style: const TextStyle(
                   fontSize: 16,
                   color: secondaryText,
@@ -1020,6 +1064,7 @@ if (selectedEmployee == 'All Employees') {
     return Scaffold(
       backgroundColor: background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: orange,
         foregroundColor: Colors.white,
         centerTitle: true,

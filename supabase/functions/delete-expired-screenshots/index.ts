@@ -8,8 +8,8 @@ const corsHeaders = {
 
 type ScreenshotRow = {
   id: string;
-  image_path: string | null;
-  captured_at: string;
+  secure_image_path: string | null;
+  expires_at: string;
 };
 
 Deno.serve(async (req: Request) => {
@@ -94,18 +94,16 @@ Deno.serve(async (req: Request) => {
       },
     );
 
-    const cutoff = new Date(
-      Date.now() - 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const nowIso = new Date().toISOString();
 
-    const {
-      data: expiredScreenshots,
-      error: fetchError,
-    } = await adminClient
-      .from("screenshots")
-      .select("id, image_path, captured_at")
-      .lt("captured_at", cutoff)
-      .limit(500);
+const {
+  data: expiredScreenshots,
+  error: fetchError,
+} = await adminClient
+  .from("screenshots")
+  .select("id, secure_image_path, expires_at")
+  .lte("expires_at", nowIso)
+  .limit(500);
 
     if (fetchError) {
       throw fetchError;
@@ -121,7 +119,7 @@ Deno.serve(async (req: Request) => {
           deletedFiles: 0,
           deletedRows: 0,
           message: "No expired screenshots found.",
-          cutoff,
+          cutoff: nowIso,
         }),
         {
           status: 200,
@@ -134,7 +132,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const paths = expiredScreenshots
-      .map((row: ScreenshotRow) => row.image_path?.trim())
+  .map(
+    (row: ScreenshotRow) =>
+      row.secure_image_path?.trim(),
+  )
       .filter(
         (path: string | undefined): path is string =>
           path !== undefined && path.length > 0,
@@ -143,8 +144,8 @@ Deno.serve(async (req: Request) => {
     if (paths.length > 0) {
       const { error: storageError } =
           await adminClient.storage
-            .from("screenshots")
-            .remove(paths);
+  .from("employee-screenshots")
+  .remove(paths);
 
       if (storageError) {
         throw storageError;
@@ -169,7 +170,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         deletedFiles: paths.length,
         deletedRows: ids.length,
-        cutoff,
+        cutoff: nowIso,
       }),
       {
         status: 200,

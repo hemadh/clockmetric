@@ -68,14 +68,17 @@ class _LoginScreenState extends State<LoginScreen> {
         _friendlyLoginError(error.message),
         isError: true,
       );
-    } catch (error) {
-      if (!mounted) return;
+    } catch (error, stackTrace) {
+  debugPrint('LOGIN ERROR: $error');
+  debugPrintStack(stackTrace: stackTrace);
 
-      _showMessage(
-        _friendlyLoginError(error.toString()),
-        isError: true,
-      );
-    } finally {
+  if (!mounted) return;
+
+  _showMessage(
+    error.toString(),
+    isError: true,
+  );
+} finally {
       if (mounted) {
         setState(() {
           isLoading = false;
@@ -464,7 +467,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         child: Image.asset(
-                          'assets/images/floratime_logo.png',
+                          'assets/images/clockmetric_logo.png',
                           fit: BoxFit.contain,
                         ),
                       ),
@@ -515,7 +518,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const Spacer(),
                       const SizedBox(height: 28),
                       Text(
-                        'FloraTime • Version $appVersion',
+                        'ClockMetric • Version $appVersion',
                         style: TextStyle(
                           color: Colors.white
                               .withValues(
@@ -604,7 +607,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     child: Image.asset(
-                      'assets/images/floratime_logo.png',
+                      'assets/images/clockmetric_logo.png',
                       fit: BoxFit.contain,
                     ),
                   ),

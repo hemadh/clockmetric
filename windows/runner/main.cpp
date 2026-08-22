@@ -40,7 +40,7 @@ void RegisterTimeTrackerProtocol() {
   }
 
   const wchar_t* description =
-      L"URL:FloraTime Protocol";
+      L"URL:ClockMetric Protocol";
 
   RegSetValueExW(
       protocol_key,
@@ -131,9 +131,9 @@ int APIENTRY wWinMain(
   Win32Window::Size size(1280, 720);
 
   if (!window.Create(
-          L"FloraTime",
-          origin,
-          size)) {
+        L"ClockMetric",
+        origin,
+        size)) {
     return EXIT_FAILURE;
   }
 

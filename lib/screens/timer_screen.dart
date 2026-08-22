@@ -8,7 +8,14 @@ import '../services/time_entry_service.dart';
 import '../theme/app_colors.dart';
 
 class TimerScreen extends StatefulWidget {
-  const TimerScreen({super.key});
+  final String? initialProjectId;
+  final bool autoStart;
+
+  const TimerScreen({
+    super.key,
+    this.initialProjectId,
+    this.autoStart = false,
+  });
 
   @override
   State<TimerScreen> createState() => _TimerScreenState();
@@ -43,7 +50,25 @@ class _TimerScreenState extends State<TimerScreen> {
   Future<void> initializeScreen() async {
     try {
       await loadProjects();
-      await loadRunningTimer();
+await loadRunningTimer();
+
+if (!isRunning &&
+    widget.initialProjectId != null &&
+    widget.initialProjectId!.isNotEmpty) {
+  await ensureRunningProjectIsAvailable(
+    widget.initialProjectId!,
+  );
+
+  if (!mounted) return;
+
+  setState(() {
+    selectedProjectId = widget.initialProjectId;
+  });
+
+  if (widget.autoStart && !isAdmin) {
+    await startTimer();
+  }
+}
     } catch (error) {
       debugPrint(
         'Timer screen initialization error: $error',
@@ -299,6 +324,14 @@ class _TimerScreenState extends State<TimerScreen> {
   }
 
   Future<void> startTimer() async {
+    if (isAdmin) {
+      _showMessage(
+        'Admins cannot start timers.',
+        isError: true,
+      );
+      return;
+    }
+
     if (selectedProjectId == null) {
       _showMessage(
         projects.isEmpty && !isAdmin
@@ -674,6 +707,7 @@ class _TimerScreenState extends State<TimerScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor:
             AppColors.primary,
         foregroundColor:
@@ -1044,7 +1078,8 @@ class _TimerScreenState extends State<TimerScreen> {
                       const SizedBox(
                         height: 34,
                       ),
-                      Row(
+                      if (!isAdmin || isRunning)
+                        Row(
                         children: [
                           Expanded(
                             child: SizedBox(

@@ -12,11 +12,13 @@ import 'leave_request_screen.dart';
 import 'login_screen.dart';
 import 'project_management_screen.dart';
 import 'screenshot_gallery_screen.dart';
+import 'keyboard_activity_screen.dart';
 import 'timer_screen.dart';
 import 'timesheet_screen.dart';
 import 'weekly_report_screen.dart';
 import 'workspace_screen.dart';
 import '../services/update_service.dart';
+import '../services/time_entry_service.dart';
 
 import '../widgets/dashboard/dashboard_sidebar.dart';
 
@@ -48,6 +50,10 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   final Set<String> expandedDateGroups = <String>{};
   final Set<String> expandedEmployeeGroups = <String>{};
 
+
+  String selectedPage = 'dashboard';
+  bool sidebarCollapsed = false;
+
   bool get isAdmin =>
       currentUserRole.trim().toLowerCase() == 'admin';
 
@@ -73,7 +79,6 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-  checkForApplicationUpdate();
 });
 
     SessionTimeoutService.instance.start(logout);
@@ -144,11 +149,11 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
           .eq('workspace_id', currentWorkspaceId)
           .gte(
             'start_time',
-            weekStart.toUtc().toIso8601String(),
+            weekStart.toIso8601String(),
           )
           .lt(
             'start_time',
-            nextWeekStart.toUtc().toIso8601String(),
+            nextWeekStart.toIso8601String(),
           );
 
       if (!isAdmin) {
@@ -226,15 +231,7 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
       return Duration.zero;
     }
 
-    /*
-     * Protect the dashboard from corrupted historical records.
-     * A single time entry cannot be longer than 24 hours.
-     */
     final duration = end.difference(start);
-
-    if (duration > const Duration(hours: 24)) {
-      return Duration.zero;
-    }
 
     return duration;
   }
@@ -243,7 +240,9 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
     Duration total = Duration.zero;
 
     for (final entry in weekEntries) {
-      total += _entryDuration(entry);
+      total += Duration(
+  seconds: _entryDuration(entry).inSeconds,
+);
     }
 
     return total;
@@ -310,7 +309,9 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
     Duration total = Duration.zero;
 
     for (final entry in entries) {
-      total += _entryDuration(entry);
+      total += Duration(
+  seconds: _entryDuration(entry).inSeconds,
+);
     }
 
     return total;
@@ -950,6 +951,169 @@ const SizedBox(width: 10),
     );
   }).toList();
 }
+Future<void> deleteTimeEntry(
+  Map<String, dynamic> entry,
+) async {
+  final entryId = entry['id']?.toString() ?? '';
+
+  if (entryId.isEmpty) {
+    return;
+  }
+
+  if (entry['end_time'] == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'A running entry cannot be deleted.',
+        ),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  final projectName =
+      entry['projects']?['project_name']?.toString() ??
+          'No Project';
+
+  final duration = _entryDuration(entry);
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        title: const Text('Delete Time Entry?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Project: $projectName'),
+            const SizedBox(height: 8),
+            Text(
+              'Duration: ${formatClockDuration(duration)}',
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'This action cannot be undone.',
+              style: TextStyle(color: Colors.red),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            onPressed: () =>
+                Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (confirmed != true || !mounted) {
+    return;
+  }
+
+  try {
+    await TimeEntryService().deleteCompletedEntry(
+      entryId: entryId,
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Time entry deleted successfully.',
+        ),
+        backgroundColor: Colors.green,
+      ),
+    );
+
+    await loadDashboard();
+  } catch (error) {
+    debugPrint(error.toString());
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Unable to delete this time entry.',
+        ),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
+Future<void> continueTimeEntry(
+  Map<String, dynamic> entry,
+) async {
+  if (isAdmin) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Admins cannot start or continue timers.',
+        ),
+        backgroundColor: Colors.red,
+      ),
+    );
+
+    return;
+  }
+
+  final projectId =
+      entry['project_id']?.toString().trim() ?? '';
+
+  if (projectId.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'This entry does not have a valid project.',
+        ),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  if (runningEntry != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'A timer is already running. Stop it before continuing another entry.',
+        ),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  resetSessionTimer();
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => TimerScreen(
+        initialProjectId: projectId,
+        autoStart: true,
+      ),
+    ),
+  );
+
+  if (!mounted) return;
+
+  await loadDashboard();
+}
 
  Widget buildTimeEntryRow(
   Map<String, dynamic> entry,
@@ -958,9 +1122,14 @@ const SizedBox(width: 10),
       entry['projects']?['project_name']?.toString() ??
           'No Project';
 
-  final employee =
-      entry['employee_name']?.toString() ??
-          'Employee';
+  final savedEmployeeName =
+      entry['employee_name']?.toString().trim() ?? '';
+
+  final employee = savedEmployeeName.isNotEmpty
+      ? savedEmployeeName
+      : entry['employee_id']?.toString() == currentUserId
+          ? currentUserName
+          : 'Unknown Employee';
 
   final note =
       entry['note']?.toString().trim() ?? '';
@@ -1061,47 +1230,45 @@ if (entry['end_time'] != null) ...[
     ),
     onSelected: (value) {
       if (value == 'continue') {
-        debugPrint(
-          'Continue project: ${entry['project_id']}',
-        );
-      } else if (value == 'delete') {
-        debugPrint(
-          'Delete entry: ${entry['id']}',
-        );
-      }
+  continueTimeEntry(entry);
+} if (value == 'delete') {
+  deleteTimeEntry(entry);
+}
     },
-    itemBuilder: (context) {
-      return const [
-        PopupMenuItem<String>(
-          value: 'continue',
-          child: Row(
-            children: [
-              Icon(Icons.play_arrow_outlined),
-              SizedBox(width: 10),
-              Text('Continue'),
-            ],
-          ),
+   itemBuilder: (context) {
+  return [
+    if (!isAdmin)
+      const PopupMenuItem<String>(
+        value: 'continue',
+        child: Row(
+          children: [
+            Icon(Icons.play_arrow_outlined),
+            SizedBox(width: 10),
+            Text('Continue'),
+          ],
         ),
-        PopupMenuItem<String>(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(
-                Icons.delete_outline,
-                color: Colors.red,
-              ),
-              SizedBox(width: 10),
-              Text(
-                'Delete',
-                style: TextStyle(
-                  color: Colors.red,
-                ),
-              ),
-            ],
+      ),
+
+    const PopupMenuItem<String>(
+      value: 'delete',
+      child: Row(
+        children: [
+          Icon(
+            Icons.delete_outline,
+            color: Colors.red,
           ),
-        ),
-      ];
-    },
+          SizedBox(width: 10),
+          Text(
+            'Delete',
+            style: TextStyle(
+              color: Colors.red,
+            ),
+          ),
+        ],
+      ),
+    ),
+  ];
+},
   ),
 ],
       ],
@@ -1110,17 +1277,12 @@ if (entry['end_time'] != null) ...[
 }
 
   void openTimerScreen() {
-    resetSessionTimer();
+  resetSessionTimer();
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const TimerScreen(),
-      ),
-    ).then(
-      (_) => loadDashboard(),
-    );
-  }
+  setState(() {
+    selectedPage = 'timer';
+  });
+}
 
   Widget dashboardContent() {
     return RefreshIndicator(
@@ -1145,7 +1307,61 @@ if (entry['end_time'] != null) ...[
       ),
     );
   }
+Widget buildSelectedPage() {
+  switch (selectedPage) {
+    case 'timer':
+      return const TimerScreen();
 
+    case 'timesheet':
+      return TimesheetScreen(
+        isManager: isAdmin,
+        employeeName: currentUserName,
+      );
+
+    case 'screenshots':
+      return const ScreenshotGalleryScreen();
+
+    case 'keyboard_activity':
+      return const KeyboardActivityScreen();
+
+    case 'leave':
+      return const LeaveRequestScreen();
+
+    case 'employees':
+      return const EmployeeManagementScreen();
+
+    case 'projects':
+      return const ProjectManagementScreen();
+
+    case 'workspace':
+      return const WorkspaceScreen();
+
+    case 'reports':
+      return const WeeklyReportScreen();
+
+    case 'approvals':
+      return const LeaveApprovalScreen();
+
+    case 'change_password':
+      return const ChangePasswordScreen();
+
+    case 'dashboard':
+    default:
+      if (loading) {
+        return const Center(
+          child: CircularProgressIndicator(
+            color: orange,
+          ),
+        );
+      }
+
+      if (errorMessage != null) {
+        return buildError();
+      }
+
+      return dashboardContent();
+  }
+}
   Widget buildError() {
     return Center(
       child: Column(
@@ -1190,139 +1406,110 @@ if (entry['end_time'] != null) ...[
         body: Row(
           children: [
             DashboardSidebar(
-              workspaceName: currentWorkspaceName,
-              currentPage: 'dashboard',
-              isAdmin: isAdmin,
-              onDashboard: resetSessionTimer,
-              onTimer: openTimerScreen,
+  workspaceName: currentWorkspaceName,
+  currentPage: selectedPage,
+  isAdmin: isAdmin,
+  isCollapsed: sidebarCollapsed,
+onToggle: () {
+  setState(() {
+    sidebarCollapsed = !sidebarCollapsed;
+  });
+},
+  onDashboard: () {
+  resetSessionTimer();
+
+  setState(() {
+    selectedPage = 'dashboard';
+  });
+
+  loadDashboard();
+},
+              onTimer: () {
+  resetSessionTimer();
+
+  setState(() {
+    selectedPage = 'timer';
+  });
+},
               onTimesheet: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TimesheetScreen(
-                      isManager: false,
-                      employeeName: currentUserName,
-                    ),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'timesheet';
+  });
+},
               onScreenshots: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const ScreenshotGalleryScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'screenshots';
+  });
+},
+             onKeyboardActivity: () {
+  resetSessionTimer();
+
+  setState(() {
+    selectedPage = 'keyboard_activity';
+  });
+},
               onLeave: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const LeaveRequestScreen(),
-                  ),
-                );
-              },
-              onEmployees: () {
-                resetSessionTimer();
+  setState(() {
+    selectedPage = 'leave';
+  });
+},
+             onEmployees: () {
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const EmployeeManagementScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'employees';
+  });
+},
               onProjects: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const ProjectManagementScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'projects';
+  });
+},
               onWorkspace: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const WorkspaceScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'workspace';
+  });
+},
               onReports: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const WeeklyReportScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'reports';
+  });
+},
               onApprovals: () {
-                resetSessionTimer();
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const LeaveApprovalScreen(),
-                  ),
-                );
-              },
-              onChangePassword: () {
-                resetSessionTimer();
+  setState(() {
+    selectedPage = 'approvals';
+  });
+},
+             onChangePassword: () {
+  resetSessionTimer();
 
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        const ChangePasswordScreen(),
-                  ),
-                );
-              },
+  setState(() {
+    selectedPage = 'change_password';
+  });
+},
               onLogout: logout,
             ),
-            Expanded(
-              child: loading
-                  ? const Center(
-                      child:
-                          CircularProgressIndicator(
-                        color: orange,
-                      ),
-                    )
-                  : errorMessage != null
-                      ? buildError()
-                      : dashboardContent(),
-            ),
+           Expanded(
+  child: buildSelectedPage(),
+),
           ],
         ),
       ),
     );
   }
-  Future<void> checkForApplicationUpdate() async {
-  final update = await UpdateService().checkForUpdate();
-
-  if (!mounted || update == null) return;
-
-  await UpdateService().showUpdateDialog(
-    context,
-    update,
-  );
-}
+  
 }

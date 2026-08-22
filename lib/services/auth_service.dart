@@ -1,36 +1,62 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import '../main.dart';
-
 class AuthService {
-  String get deviceName {
-    try {
-      return Platform.localHostname;
-    } catch (_) {
-      return 'Unknown Device';
-    }
+String get deviceName {
+  if (kIsWeb) {
+    return 'Web Browser';
   }
 
-  String get platformName {
-    if (Platform.isWindows) return 'Windows';
-    if (Platform.isMacOS) return 'macOS';
-    if (Platform.isLinux) return 'Linux';
-    if (Platform.isAndroid) return 'Android';
-    if (Platform.isIOS) return 'iOS';
+  return '${defaultTargetPlatform.name} Device';
+}
 
-    return 'Unknown';
+String get platformName {
+  if (kIsWeb) {
+    return 'Web';
   }
+
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.windows:
+      return 'Windows';
+    case TargetPlatform.macOS:
+      return 'macOS';
+    case TargetPlatform.linux:
+      return 'Linux';
+    case TargetPlatform.android:
+      return 'Android';
+    case TargetPlatform.iOS:
+      return 'iOS';
+    case TargetPlatform.fuchsia:
+      return 'Fuchsia';
+  }
+}
 
   Future<Map<String, dynamic>> login({
     required String email,
     required String password,
   }) async {
-    final response = await supabase.auth.signInWithPassword(
-      email: email,
-      password: password,
-    );
+    debugPrint('LOGIN: starting Supabase sign-in');
+debugPrint('LOGIN EMAIL: $email');
+
+debugPrint('LOGIN: starting Supabase sign-in');
+debugPrint('LOGIN EMAIL: $email');
+
+debugPrint('LOGIN: starting Supabase sign-in');
+debugPrint('LOGIN EMAIL: $email');
+
+final response = await supabase.auth.signInWithPassword(
+  email: email,
+  password: password,
+);
+
+debugPrint('LOGIN: Supabase authentication succeeded');
+
+debugPrint('LOGIN: Supabase authentication succeeded');
+
+debugPrint('LOGIN: Supabase authentication succeeded');
 
     final user = response.user;
+    debugPrint('LOGIN USER ID: ${user?.id}');
 
     if (user == null) {
       throw Exception("Login failed.");

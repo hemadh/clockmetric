@@ -1,30 +1,19 @@
-import 'dart:async';
-
 class SessionTimeoutService {
   SessionTimeoutService._();
 
   static final SessionTimeoutService instance =
       SessionTimeoutService._();
 
-  Timer? _timer;
-
-  static const Duration timeout = Duration(minutes: 10);
-
   void start(VoidCallback onTimeout) {
-    stop();
-
-    _timer = Timer(timeout, () {
-      onTimeout();
-    });
+    // Automatic logout disabled.
   }
 
   void reset(VoidCallback onTimeout) {
-    start(onTimeout);
+    // Automatic logout disabled.
   }
 
   void stop() {
-    _timer?.cancel();
-    _timer = null;
+    // Nothing to stop.
   }
 }
 

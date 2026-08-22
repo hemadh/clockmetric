@@ -221,7 +221,7 @@ Future<void> loadWeeklyTeamTime() async {
 
   try {
     final response = await supabase.rpc(
-      'get_weekly_team_time',
+      'get_weekly_team_time_seconds',
       params: {
         'p_week_start': getWeekStart().toIso8601String(),
         'p_week_end': getWeekEnd().toIso8601String(),
@@ -237,9 +237,9 @@ Future<void> loadWeeklyTeamTime() async {
           item['employee_name']?.toString().trim();
 
       final totalMinutes = int.tryParse(
-            item['total_minutes']?.toString() ?? '',
-          ) ??
-          0;
+      item['total_seconds']?.toString() ?? '',
+    ) ??
+    0;
 
       if (employeeName == null ||
           employeeName.isEmpty ||
@@ -307,6 +307,31 @@ Future<void> loadWeeklyTeamTime() async {
     return effectiveEndTime.difference(startTime).inMinutes;
   }
 
+  int entrySeconds(Map<String, dynamic> entry) {
+  final startTime = DateTime.tryParse(
+    entry['start_time']?.toString() ?? '',
+  )?.toLocal();
+
+  if (startTime != null) {
+    final endTime = DateTime.tryParse(
+      entry['end_time']?.toString() ?? '',
+    )?.toLocal();
+
+    final effectiveEndTime = endTime ?? DateTime.now();
+
+    if (!effectiveEndTime.isBefore(startTime)) {
+      return effectiveEndTime.difference(startTime).inSeconds;
+    }
+  }
+
+  final storedMinutes = int.tryParse(
+        entry['duration_minutes']?.toString() ?? '',
+      ) ??
+      0;
+
+  return storedMinutes * 60;
+}
+
   String getProjectKey(Map<String, dynamic> entry) {
     final projectId = entry['project_id']?.toString().trim();
 
@@ -350,7 +375,7 @@ Future<void> loadWeeklyTeamTime() async {
 
       final projectKey = getProjectKey(entry);
       final projectName = getProjectName(entry);
-      final minutes = entryMinutes(entry);
+      final minutes = entrySeconds(entry);
       final dayIndex = startTime.weekday - DateTime.monday;
 
       if (dayIndex < 0 || dayIndex > 6) continue;
@@ -382,7 +407,7 @@ Future<void> loadWeeklyTeamTime() async {
     int total = 0;
 
     for (final entry in entries) {
-      total += entryMinutes(entry);
+      total += entrySeconds(entry);
     }
 
     return total;
@@ -402,28 +427,29 @@ Future<void> loadWeeklyTeamTime() async {
     return totals;
   }
 
-  String formatDuration(int minutes) {
-    final safeMinutes = minutes < 0 ? 0 : minutes;
-    final hours = safeMinutes ~/ 60;
-    final remainingMinutes = safeMinutes % 60;
+ String formatDuration(int seconds) {
+  final safeSeconds = seconds < 0 ? 0 : seconds;
 
-    return '$hours:${remainingMinutes.toString().padLeft(2, '0')}';
-  }
+  final hours = safeSeconds ~/ 3600;
+  final minutes = (safeSeconds % 3600) ~/ 60;
+  final secs = safeSeconds % 60;
 
-  String formatLongDuration(int minutes) {
-    final hours = minutes ~/ 60;
-    final remainingMinutes = minutes % 60;
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${minutes.toString().padLeft(2, '0')}:'
+      '${secs.toString().padLeft(2, '0')}';
+}
 
-    if (hours == 0) {
-      return '$remainingMinutes min';
-    }
+  String formatLongDuration(int seconds) {
+  final safeSeconds = seconds < 0 ? 0 : seconds;
 
-    if (remainingMinutes == 0) {
-      return '$hours hr';
-    }
+  final hours = safeSeconds ~/ 3600;
+  final minutes = (safeSeconds % 3600) ~/ 60;
+  final secs = safeSeconds % 60;
 
-    return '$hours hr $remainingMinutes min';
-  }
+  return '${hours.toString().padLeft(2, '0')}:'
+      '${minutes.toString().padLeft(2, '0')}:'
+      '${secs.toString().padLeft(2, '0')}';
+}
 
   String formatTime(DateTime? time) {
     if (time == null) return '--:--';
@@ -534,9 +560,9 @@ Future<void> loadWeeklyTeamTime() async {
     if (dayEntries.isEmpty) return;
 
     final dayTotal = dayEntries.fold<int>(
-      0,
-      (total, entry) => total + entryMinutes(entry),
-    );
+  0,
+  (total, entry) => total + entrySeconds(entry),
+);
 
     showDialog<void>(
       context: context,
@@ -709,7 +735,7 @@ Future<void> loadWeeklyTeamTime() async {
                 ),
               ),
               Text(
-                formatDuration(entryMinutes(entry)),
+                formatDuration(entrySeconds(entry)),
                 style: const TextStyle(
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.bold,
@@ -741,6 +767,7 @@ Future<void> loadWeeklyTeamTime() async {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,

@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'windows_screenshot_service.dart';
 
+
 class ScreenshotCaptureService {
   Future<Uint8List?> capture() async {
     final directory =
@@ -15,7 +16,7 @@ class ScreenshotCaptureService {
 
     final path =
         '${directory.path}${Platform.pathSeparator}'
-        'floratime_capture_$timestamp.png';
+        'ClockMetric_capture_$timestamp.png';
 
     final file = await WindowsScreenshotService()
         .captureFullScreen(path);

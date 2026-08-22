@@ -1992,6 +1992,7 @@ String _formatClockDuration(int minutes) {
     return Scaffold(
       backgroundColor: background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xFF1E40AF),
         foregroundColor:
             Colors.white,

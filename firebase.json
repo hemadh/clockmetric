@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "clockmetric",
     "public": "build/web",
     "ignore": [
       "firebase.json",

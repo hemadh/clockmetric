@@ -11,11 +11,12 @@ import 'screens/login_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/session_timeout_service.dart';
+import 'services/update_service.dart';
 
 final supabase = Supabase.instance.client;
 Uri? startupDeepLink;
 
-const String appVersion = '1.0.0';
+const String appVersion = '1.0.5';
 
 String currentUserId = '';
 String currentUserName = '';
@@ -25,6 +26,115 @@ String currentWorkspaceName = '';
 
 ValueNotifier<bool> isDarkMode = ValueNotifier(false);
 
+class _UpdateDownloadDialog extends StatefulWidget {
+  final AppUpdateInfo update;
+  final UpdateService updateService;
+
+  const _UpdateDownloadDialog({
+    super.key,
+    required this.update,
+    required this.updateService,
+  });
+
+  @override
+  State<_UpdateDownloadDialog> createState() =>
+      _UpdateDownloadDialogState();
+}
+
+class _UpdateDownloadDialogState
+    extends State<_UpdateDownloadDialog> {
+  double progress = 0;
+  String? errorMessage;
+  bool downloading = true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startDownload();
+    });
+  }
+
+  Future<void> _startDownload() async {
+    if (!mounted) return;
+
+    setState(() {
+      downloading = true;
+      progress = 0;
+      errorMessage = null;
+    });
+
+    try {
+      await widget.updateService.downloadAndInstallUpdate(
+        widget.update,
+        onProgress: (value) {
+          if (!mounted) return;
+
+          setState(() {
+            progress = value;
+          });
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        downloading = false;
+        errorMessage = error.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !downloading,
+      child: AlertDialog(
+        title: Text(
+          downloading
+              ? 'Downloading Update'
+              : 'Update Failed',
+        ),
+        content: errorMessage != null
+            ? Text(errorMessage!)
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LinearProgressIndicator(
+                    value: progress > 0 ? progress : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    progress > 0
+                        ? '${(progress * 100).toStringAsFixed(0)}%'
+                        : 'Preparing download...',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'ClockMetric will close and launch the installer when the download finishes.',
+                  ),
+                ],
+              ),
+        actions: [
+          if (!downloading)
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Close'),
+            ),
+          if (!downloading)
+            ElevatedButton(
+              onPressed: _startDownload,
+              child: const Text('Retry'),
+            ),
+        ],
+      ),
+    );
+  }
+} 
 Future<void> main(List<String> args) async {
   for (final argument in args) {
     final uri = Uri.tryParse(argument);
@@ -39,12 +149,12 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-  url: 'https://zakvowocgunowgxxslqm.supabase.co',
-  anonKey: 'sb_publishable_CPIzdsRFAy_8hPYucVkcTA_T-FJyGoA',
-  authOptions: const FlutterAuthClientOptions(
-    authFlowType: AuthFlowType.implicit,
-  ),
-);
+    url: 'https://zakvowocgunowgxxslqm.supabase.co',
+    anonKey: 'sb_publishable_CPIzdsRFAy_8hPYucVkcTA_T-FJyGoA',
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.implicit,
+    ),
+  );
 
   runApp(const MyApp());
 }
@@ -59,7 +169,7 @@ class MyApp extends StatelessWidget {
       builder: (context, dark, _) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: 'Time Tracker',
+          title: 'Clock Metric',
           themeMode: dark ? ThemeMode.dark : ThemeMode.light,
           theme: ThemeData(
             useMaterial3: true,
@@ -110,6 +220,8 @@ class _AuthGateState extends State<AuthGate> {
   StreamSubscription<AuthState>? authSubscription;
   late final AppLinks appLinks;
   StreamSubscription<Uri>? appLinksSubscription;
+  final UpdateService _updateService = UpdateService();
+  bool _checkingForUpdate = false;
 
   @override
   void initState() {
@@ -352,64 +464,17 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   void _startSessionTimeout() {
-    if (!loggedIn) return;
+  // Inactivity logout is disabled.
+}
 
-    SessionTimeoutService.instance.start(
-      _handleSessionTimeout,
-    );
-  }
-
-  void _resetSessionTimeout() {
-    if (!loggedIn) return;
-
-    SessionTimeoutService.instance.reset(
-      _handleSessionTimeout,
-    );
-  }
-
-  Future<void> _handleSessionTimeout() async {
-    if (!loggedIn) return;
-
-    SessionTimeoutService.instance.stop();
-
-    sessionExpired = true;
-
-    try {
-      await supabase.auth.signOut();
-    } catch (error) {
-      debugPrint(
-        'Session timeout sign-out error: $error',
-      );
-    }
-
-    _clearCurrentUser();
-
-    if (!mounted) return;
-
-    setState(() {
-      loggedIn = false;
-      loading = false;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) {
-        if (!mounted || !sessionExpired) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Your session expired because of inactivity. '
-              'Please log in again.',
-            ),
-            backgroundColor: Color(0xFFF97316),
-            duration: Duration(seconds: 5),
-          ),
-        );
-
-        sessionExpired = false;
-      },
-    );
-  }
+void _resetSessionTimeout() {
+  // Inactivity logout is disabled.
+}
+Future<void> _handleSessionTimeout() async {
+  // Automatic inactivity logout is disabled.
+  SessionTimeoutService.instance.stop();
+  return;
+}
 
   void _clearCurrentUser() {
     currentUserId = '';
@@ -436,7 +501,6 @@ class _AuthGateState extends State<AuthGate> {
 
     if (user == null || user.email == null) {
       SessionTimeoutService.instance.stop();
-
       _clearCurrentUser();
 
       if (!mounted) return;
@@ -445,7 +509,6 @@ class _AuthGateState extends State<AuthGate> {
         loggedIn = false;
         loading = false;
       });
-
       return;
     }
 
@@ -457,9 +520,7 @@ class _AuthGateState extends State<AuthGate> {
 
     try {
       final email = user.email!.trim().toLowerCase();
-
-      final metadata =
-          user.userMetadata ?? <String, dynamic>{};
+      final metadata = user.userMetadata ?? <String, dynamic>{};
 
       final invitationCompleted =
           metadata['invitation_completed'] == true;
@@ -467,8 +528,35 @@ class _AuthGateState extends State<AuthGate> {
       final invitationWorkspaceId =
           metadata['workspace_id']?.toString().trim() ?? '';
 
+      final metadataRole =
+          metadata['role']?.toString().trim().toLowerCase() ?? '';
+
       final hasWorkspaceInvitation =
-          invitationWorkspaceId.isNotEmpty;
+          invitationWorkspaceId.isNotEmpty &&
+          metadataRole == 'employee' &&
+          !invitationCompleted;
+
+      /*
+       * IMPORTANT:
+       * An invited employee may not have a row in public.profiles yet.
+       * Also, RLS may prevent reading profiles before the invitation is
+       * completed. Therefore, route invited employees to the acceptance
+       * screen BEFORE querying the profiles table.
+       */
+      if (hasWorkspaceInvitation) {
+        SessionTimeoutService.instance.stop();
+        _clearCurrentUser();
+
+        if (!mounted) return;
+
+        setState(() {
+          loggedIn = false;
+          loading = false;
+        });
+
+        _openInvitationScreen();
+        return;
+      }
 
       final profile = await supabase
           .from('profiles')
@@ -491,10 +579,32 @@ class _AuthGateState extends State<AuthGate> {
         return;
       }
 
-      if (profile == null &&
-    hasWorkspaceInvitation &&
-    !invitationCompleted) {
-  SessionTimeoutService.instance.stop();
+      if (profile == null) {
+        throw Exception(
+          'No profile exists for this account.',
+        );
+      }
+
+      final profileRole =
+          profile['role']?.toString().trim().toLowerCase() ?? '';
+
+      final resolvedRole =
+          profileRole.isNotEmpty ? profileRole : 'employee';
+
+      // ======================================================
+// WEB VERSION IS FOR ADMIN ONLY
+// This does NOT affect the Windows application.
+// ======================================================
+
+if (kIsWeb && resolvedRole != 'admin') {
+  try {
+    await supabase.auth.signOut();
+  } catch (error) {
+    debugPrint(
+      'Web non-admin sign-out error: $error',
+    );
+  }
+
   _clearCurrentUser();
 
   if (!mounted) return;
@@ -504,48 +614,23 @@ class _AuthGateState extends State<AuthGate> {
     loading = false;
   });
 
-  _openInvitationScreen();
+  WidgetsBinding.instance.addPostFrameCallback(
+    (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Web access is available to administrators only.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+    },
+  );
+
   return;
 }
-
-if (profile == null) {
-  throw Exception(
-    'No profile exists for this account.',
-  );
-}
-
-      final profileRole =
-          profile['role']?.toString().trim().toLowerCase() ?? '';
-
-      final resolvedRole =
-          profileRole.isNotEmpty ? profileRole : 'employee';
-
-      /*
-       * The invitation screen must only appear for employees.
-       *
-       * Admins with workspace metadata must always continue
-       * through the normal account checks and dashboard flow.
-       */
-      final shouldOpenInvitation =
-          resolvedRole == 'employee' &&
-          hasWorkspaceInvitation &&
-          !invitationCompleted;
-
-      if (shouldOpenInvitation) {
-        SessionTimeoutService.instance.stop();
-
-        _clearCurrentUser();
-
-        if (!mounted) return;
-
-        setState(() {
-          loggedIn = false;
-          loading = false;
-        });
-
-        _openInvitationScreen();
-        return;
-      }
 
       final approvalStatus =
           profile['approval_status']
@@ -592,7 +677,6 @@ if (profile == null) {
             );
           },
         );
-
         return;
       }
 
@@ -630,19 +714,24 @@ if (profile == null) {
       }
 
       currentWorkspaceName =
-          workspace['workspace_name']?.toString().trim() ?? '';
+    workspace['workspace_name']?.toString().trim() ?? '';
 
-      if (!mounted) return;
+if (!mounted) return;
 
-      setState(() {
-        loggedIn = true;
-        loading = false;
-      });
+setState(() {
+  loggedIn = true;
+  loading = false;
+});
 
-      _startSessionTimeout();
+_startSessionTimeout();
+
+// Do not run the Windows app updater on web.
+if (!kIsWeb) {
+  _checkForAppUpdate();
+}
     } catch (error) {
       debugPrint(
-        'Unable to load account: $error',
+        'Unable to load account temporarily: $error',
       );
 
       if (passwordRecoveryActive) {
@@ -657,42 +746,108 @@ if (profile == null) {
         return;
       }
 
-      SessionTimeoutService.instance.stop();
-
-      _clearCurrentUser();
-
-      try {
-        await supabase.auth.signOut();
-      } catch (signOutError) {
-        debugPrint(
-          'Account load failure sign-out error: $signOutError',
-        );
-      }
+      // Keep the authenticated session during temporary network,
+      // profile, workspace, or token-refresh errors.
+      final stillAuthenticated =
+          supabase.auth.currentUser != null;
 
       if (!mounted) return;
 
       setState(() {
-        loggedIn = false;
+        loggedIn = stillAuthenticated;
         loading = false;
       });
 
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) {
-          if (!mounted) return;
+      if (stillAuthenticated) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) {
+            if (!mounted) return;
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Unable to load your account. '
-                'Please log in again.',
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Connection issue detected. '
+                  'Your login session has been kept active.',
+                ),
+                backgroundColor: Color(0xFFF97316),
               ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        },
-      );
+            );
+          },
+        );
+      }
     }
   }
+  Future<void> _checkForAppUpdate() async {
+  if (_checkingForUpdate || !mounted) {
+    return;
+  }
+
+  _checkingForUpdate = true;
+
+  try {
+    final update = await _updateService.checkForUpdate();
+
+    if (!mounted || update == null) {
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !update.forceUpdate,
+      builder: (dialogContext) {
+        return PopScope(
+          canPop: !update.forceUpdate,
+          child: AlertDialog(
+            title: const Text('Update Available'),
+            content: Text(
+              'A new version (${update.version}) of ClockMetric is available.'
+              '${update.releaseNotes == null ||
+                      update.releaseNotes!.trim().isEmpty
+                  ? ''
+                  : '\n\n${update.releaseNotes!.trim()}'}',
+            ),
+            actions: [
+              if (!update.forceUpdate)
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Later'),
+                ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+
+                  await _showUpdateDownloadDialog(update);
+                },
+                child: const Text('Update'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  } catch (error) {
+    debugPrint('Update error: $error');
+  } finally {
+    _checkingForUpdate = false;
+  }
+}
+
+Future<void> _showUpdateDownloadDialog(
+  AppUpdateInfo update,
+) async {
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) {
+      return _UpdateDownloadDialog(
+        update: update,
+        updateService: _updateService,
+      );
+    },
+  );
+}
 
   @override
   void dispose() {

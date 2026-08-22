@@ -256,7 +256,7 @@ class _CreateWorkspaceScreenState
                     CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Start with FloraTime',
+              'Start with ClockMetric',
                     style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 30,

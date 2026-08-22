@@ -72,13 +72,13 @@ class _SplashScreenState
                   ],
                 ),
                 child: Image.asset(
-                  'assets/images/floratime_logo.png',
+                  'assets/images/clockmetric_logo.png',
                   fit: BoxFit.contain,
                 ),
               ),
               const SizedBox(height: 28),
               const Text(
-                'FloraTime',
+                'ClockMetric',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 34,

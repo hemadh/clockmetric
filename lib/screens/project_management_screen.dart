@@ -812,6 +812,7 @@ class _ProjectManagementScreenState
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,

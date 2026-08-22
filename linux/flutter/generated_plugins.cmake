@@ -3,9 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  flutter_screen_capture
   gtk
-  screen_retriever_linux
   url_launcher_linux
 )
 
