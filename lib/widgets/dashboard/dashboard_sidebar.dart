@@ -161,12 +161,13 @@ class DashboardSidebar extends StatelessWidget {
               onTap: onDashboard,
             ),
 
-            _menuItem(
-              icon: Icons.timer_rounded,
-              title: 'Timer',
-              active: currentPage == 'timer',
-              onTap: onTimer,
-            ),
+            if (!isAdmin)
+  _menuItem(
+    icon: Icons.timer_rounded,
+    title: 'Timer',
+    active: currentPage == 'timer',
+    onTap: onTimer,
+  ),
 
             _menuItem(
               icon: Icons.assignment_rounded,
