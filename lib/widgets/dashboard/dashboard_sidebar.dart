@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../main.dart';
 
 class DashboardSidebar extends StatelessWidget {
   final String workspaceName;
@@ -19,6 +20,7 @@ class DashboardSidebar extends StatelessWidget {
   final VoidCallback onWorkspace;
   final VoidCallback onReports;
   final VoidCallback onApprovals;
+  final VoidCallback onBilling;
   final VoidCallback onChangePassword;
   final VoidCallback onLogout;
 
@@ -40,6 +42,7 @@ class DashboardSidebar extends StatelessWidget {
     required this.onWorkspace,
     required this.onReports,
     required this.onApprovals,
+    required this.onBilling,
     required this.onChangePassword,
     required this.onLogout,
   });
@@ -137,19 +140,24 @@ class DashboardSidebar extends StatelessWidget {
               const SizedBox(height: 6),
 
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  workspaceName.isEmpty
-                      ? 'Workspace'
-                      : workspaceName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: textGrey,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+  padding: const EdgeInsets.symmetric(horizontal: 20),
+  child: ValueListenableBuilder<String>(
+    valueListenable: currentWorkspaceNameNotifier,
+    builder: (context, value, _) {
+      final name = value.isEmpty ? workspaceName : value;
+
+      return Text(
+        name.isEmpty ? 'Workspace' : name,
+        textAlign: TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: textGrey,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    },
+  ),
+),
             ],
 
             SizedBox(height: isCollapsed ? 22 : 30),
@@ -259,6 +267,12 @@ class DashboardSidebar extends StatelessWidget {
                 active: currentPage == 'approvals',
                 onTap: onApprovals,
               ),
+              _menuItem(
+  icon: Icons.credit_card_rounded,
+  title: 'Billing',
+  active: currentPage == 'billing',
+  onTap: onBilling,
+),
             ],
 
             Padding(

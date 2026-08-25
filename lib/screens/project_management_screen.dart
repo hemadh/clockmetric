@@ -212,7 +212,7 @@ class _ProjectManagementScreenState
             return AlertDialog(
               backgroundColor: AppColors.surface,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(14),
               ),
               title: const Row(
                 children: [
@@ -467,7 +467,7 @@ class _ProjectManagementScreenState
             return AlertDialog(
               backgroundColor: AppColors.surface,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(12),
               ),
               titlePadding: const EdgeInsets.fromLTRB(
                 24,
@@ -506,7 +506,7 @@ class _ProjectManagementScreenState
                           style: TextStyle(
                             color: AppColors.textPrimary,
                             fontWeight: FontWeight.bold,
-                            fontSize: 19,
+                            fontSize: 16,
                           ),
                         ),
                         const SizedBox(height: 3),
@@ -515,7 +515,7 @@ class _ProjectManagementScreenState
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: AppColors.textSecondary,
-                            fontSize: 13,
+                            fontSize: 11,
                           ),
                         ),
                       ],
@@ -653,7 +653,7 @@ class _ProjectManagementScreenState
                                       style: const TextStyle(
                                         color:
                                             AppColors.textSecondary,
-                                        fontSize: 12,
+                                        fontSize: 11,
                                       ),
                                     ),
                                     onChanged: savingMembers
@@ -816,12 +816,14 @@ class _ProjectManagementScreenState
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 54,
         centerTitle: true,
         title: const Text(
           'Project Management',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
           ),
         ),
         actions: [
@@ -833,15 +835,17 @@ class _ProjectManagementScreenState
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        extendedPadding: const EdgeInsets.symmetric(horizontal: 16),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         onPressed:
             addingProject ? null : showAddProjectDialog,
-        icon: const Icon(Icons.add),
+        icon: const Icon(Icons.add, size: 18),
         label: const Text(
           'Add Project',
           style: TextStyle(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
           ),
         ),
       ),
@@ -862,14 +866,14 @@ class _ProjectManagementScreenState
                         physics:
                             const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(
-                          26,
-                          26,
-                          26,
-                          110,
+                          22,
+                          18,
+                          22,
+                          90,
                         ),
                         children: [
                           buildHeader(),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
                           ...projects.map(buildProjectCard),
                         ],
                       ),
@@ -888,16 +892,16 @@ class _ProjectManagementScreenState
                 'Workspace Projects',
                 style: TextStyle(
                   color: AppColors.textPrimary,
-                  fontSize: 27,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              SizedBox(height: 6),
+              SizedBox(height: 4),
               Text(
                 'Create projects and assign employees for time tracking.',
                 style: TextStyle(
                   color: AppColors.textSecondary,
-                  fontSize: 15,
+                  fontSize: 11,
                 ),
               ),
             ],
@@ -905,12 +909,12 @@ class _ProjectManagementScreenState
         ),
         Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 9,
+            horizontal: 11,
+            vertical: 6,
           ),
           decoration: BoxDecoration(
             color: AppColors.primarySurface,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: AppColors.primaryLight,
             ),
@@ -942,19 +946,19 @@ class _ProjectManagementScreenState
     final members = getMembersForProject(projectId);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
             color: Color(0x0A000000),
-            blurRadius: 16,
-            offset: Offset(0, 6),
+            blurRadius: 10,
+            offset: Offset(0, 3),
           ),
         ],
       ),
@@ -963,11 +967,11 @@ class _ProjectManagementScreenState
           Row(
             children: [
               Container(
-                width: 58,
-                height: 58,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: AppColors.primaryLight,
                   ),
@@ -977,13 +981,13 @@ class _ProjectManagementScreenState
                     projectInitial(displayName),
                     style: const TextStyle(
                       color: AppColors.primary,
-                      fontSize: 22,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 17),
+              const SizedBox(width: 9),
               Expanded(
                 child: Column(
                   crossAxisAlignment:
@@ -993,16 +997,16 @@ class _ProjectManagementScreenState
                       displayName,
                       style: const TextStyle(
                         color: AppColors.textPrimary,
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
                         const Icon(
                           Icons.business_outlined,
-                          size: 16,
+                          size: 14,
                           color: AppColors.textMuted,
                         ),
                         const SizedBox(width: 6),
@@ -1014,10 +1018,10 @@ class _ProjectManagementScreenState
                             color: AppColors.textSecondary,
                           ),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 11),
                         const Icon(
                           Icons.people_outline,
-                          size: 17,
+                          size: 15,
                           color: AppColors.textMuted,
                         ),
                         const SizedBox(width: 6),
@@ -1039,38 +1043,38 @@ class _ProjectManagementScreenState
                 ),
                 style: const TextStyle(
                   color: AppColors.textMuted,
-                  fontSize: 13,
+                  fontSize: 11,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 9),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+                  horizontal: 8,
+                  vertical: 4,
                 ),
                 decoration: BoxDecoration(
                   color: AppColors.success.withValues(
                     alpha: 0.10,
                   ),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Text(
                   'ACTIVE',
                   style: TextStyle(
                     color: AppColors.success,
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 17),
+          const SizedBox(height: 11),
           const Divider(
             color: AppColors.border,
             height: 1,
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -1082,8 +1086,8 @@ class _ProjectManagementScreenState
                         ),
                       )
                     : Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                        spacing: 6,
+                        runSpacing: 6,
                         children: members.take(5).map(
                           (employee) {
                             final name =
@@ -1095,7 +1099,7 @@ class _ProjectManagementScreenState
                             return Tooltip(
                               message: name,
                               child: CircleAvatar(
-                                radius: 18,
+                                radius: 15,
                                 backgroundColor:
                                     AppColors.primarySurface,
                                 foregroundColor:
@@ -1103,7 +1107,7 @@ class _ProjectManagementScreenState
                                 child: Text(
                                   employeeInitials(name),
                                   style: const TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -1113,7 +1117,7 @@ class _ProjectManagementScreenState
                         ).toList(),
                       ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
@@ -1121,11 +1125,11 @@ class _ProjectManagementScreenState
                     color: AppColors.primary,
                   ),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 17,
-                    vertical: 14,
+                    horizontal: 13,
+                    vertical: 9,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(9),
                   ),
                 ),
                 onPressed: () {
@@ -1133,12 +1137,13 @@ class _ProjectManagementScreenState
                 },
                 icon: const Icon(
                   Icons.group_add_outlined,
-                  size: 19,
+                  size: 16,
                 ),
                 label: const Text(
                   'Manage Employees',
                   style: TextStyle(
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -1161,7 +1166,7 @@ class _ProjectManagementScreenState
           ),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: AppColors.border,
             ),
@@ -1188,7 +1193,7 @@ class _ProjectManagementScreenState
                 style: TextStyle(
                   color: AppColors.textPrimary,
                   fontSize: 21,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 8),

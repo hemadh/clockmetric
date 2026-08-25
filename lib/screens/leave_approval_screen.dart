@@ -312,13 +312,20 @@ class _LeaveApprovalScreenState extends State<LeaveApprovalScreen> {
     });
 
     try {
-      await supabase
-          .from('leave_requests')
-          .update({
-            'status': status,
-          })
-          .eq('id', id)
-          .eq('workspace_id', currentWorkspaceId);
+      final updatedRows = await supabase
+    .from('leave_requests')
+    .update({
+      'status': status,
+    })
+    .eq('id', id)
+    .eq('workspace_id', currentWorkspaceId)
+    .select('id, status');
+
+if (updatedRows.isEmpty) {
+  throw Exception(
+    'No leave request was updated. Check the Supabase update policy.',
+  );
+}
 
       _showMessage(
         status == 'approved'

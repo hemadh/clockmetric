@@ -19,6 +19,7 @@ import 'weekly_report_screen.dart';
 import 'workspace_screen.dart';
 import '../services/update_service.dart';
 import '../services/time_entry_service.dart';
+import 'billing_screen.dart';
 
 import '../widgets/dashboard/dashboard_sidebar.dart';
 
@@ -51,7 +52,11 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   final Set<String> expandedEmployeeGroups = <String>{};
 
 
-  String selectedPage = 'dashboard';
+  String selectedPage =
+    workspaceTrialExpired &&
+            currentUserRole.trim().toLowerCase() == 'admin'
+        ? 'billing'
+        : 'dashboard';
   bool sidebarCollapsed = false;
 
   bool get isAdmin =>
@@ -81,7 +86,7 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
 });
 
-    SessionTimeoutService.instance.start(logout);
+    SessionTimeoutService.instance.start(handleSessionTimeout);
 
     loadDashboard();
 
@@ -105,8 +110,43 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   }
 
   void resetSessionTimer() {
-    SessionTimeoutService.instance.reset(logout);
+  SessionTimeoutService.instance.reset(handleSessionTimeout);
+}
+
+Future<void> handleSessionTimeout() async {
+  try {
+    final activeEntry =
+        await TimeEntryService().getRunningEntry();
+
+    if (activeEntry != null) {
+      if (!mounted) return;
+
+      SessionTimeoutService.instance.reset(
+        handleSessionTimeout,
+      );
+
+      debugPrint(
+        'Session timeout skipped because a timer is running.',
+      );
+
+      return;
+    }
+  } catch (error) {
+    debugPrint(
+      'Session timeout running-entry check failed: $error',
+    );
+
+    if (mounted) {
+      SessionTimeoutService.instance.reset(
+        handleSessionTimeout,
+      );
+    }
+
+    return;
   }
+
+  await logout();
+}
 
   Future<void> logout() async {
     SessionTimeoutService.instance.stop();
@@ -642,15 +682,17 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(width: 18),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: orange,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: openTimerScreen,
-            child: const Text('Open Timer'),
-          ),
+          if (!isAdmin) ...[
+  const SizedBox(width: 18),
+  FilledButton(
+    style: FilledButton.styleFrom(
+      backgroundColor: orange,
+      foregroundColor: Colors.white,
+    ),
+    onPressed: openTimerScreen,
+    child: const Text('Open Timer'),
+  ),
+],
         ],
       ),
     );
@@ -1342,6 +1384,11 @@ Widget buildSelectedPage() {
     case 'approvals':
       return const LeaveApprovalScreen();
 
+    case 'billing':
+  return BillingScreen(
+    workspaceId: currentWorkspaceId,
+  );
+
     case 'change_password':
       return const ChangePasswordScreen();
 
@@ -1403,113 +1450,142 @@ Widget buildSelectedPage() {
       onPointerHover: (_) => resetSessionTimer(),
       child: Scaffold(
         backgroundColor: background,
-        body: Row(
-          children: [
-            DashboardSidebar(
-  workspaceName: currentWorkspaceName,
-  currentPage: selectedPage,
-  isAdmin: isAdmin,
-  isCollapsed: sidebarCollapsed,
-onToggle: () {
-  setState(() {
-    sidebarCollapsed = !sidebarCollapsed;
-  });
-},
-  onDashboard: () {
+       body: Row(
+  children: [
+    ValueListenableBuilder<String>(
+      valueListenable: currentWorkspaceNameNotifier,
+      builder: (context, workspaceName, _) {
+        return DashboardSidebar(
+          workspaceName: workspaceName.isEmpty
+              ? currentWorkspaceName
+              : workspaceName,
+          currentPage: selectedPage,
+          isAdmin: isAdmin,
+          isCollapsed: sidebarCollapsed,
+
+          onToggle: () {
+            setState(() {
+              sidebarCollapsed = !sidebarCollapsed;
+            });
+          },
+
+          onDashboard: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'dashboard';
+            });
+
+            loadDashboard();
+          },
+
+          onTimer: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'timer';
+            });
+          },
+
+          onTimesheet: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'timesheet';
+            });
+          },
+
+          onScreenshots: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'screenshots';
+            });
+          },
+
+          onKeyboardActivity: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'keyboard_activity';
+            });
+          },
+
+          onLeave: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'leave';
+            });
+          },
+
+          onEmployees: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'employees';
+            });
+          },
+
+          onProjects: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'projects';
+            });
+          },
+
+          onWorkspace: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'workspace';
+            });
+          },
+
+          onReports: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'reports';
+            });
+          },
+
+          onApprovals: () {
+            resetSessionTimer();
+
+            setState(() {
+              selectedPage = 'approvals';
+            });
+          },
+          
+          onBilling: () {
   resetSessionTimer();
 
   setState(() {
-    selectedPage = 'dashboard';
-  });
-
-  loadDashboard();
-},
-              onTimer: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'timer';
+    selectedPage = 'billing';
   });
 },
-              onTimesheet: () {
-  resetSessionTimer();
 
-  setState(() {
-    selectedPage = 'timesheet';
-  });
-},
-              onScreenshots: () {
-  resetSessionTimer();
+          onChangePassword: () {
+            resetSessionTimer();
 
-  setState(() {
-    selectedPage = 'screenshots';
-  });
-},
-             onKeyboardActivity: () {
-  resetSessionTimer();
+            setState(() {
+              selectedPage = 'change_password';
+            });
+          },
 
-  setState(() {
-    selectedPage = 'keyboard_activity';
-  });
-},
-              onLeave: () {
-  resetSessionTimer();
+          onLogout: logout,
+        );
+      },
+    ),
 
-  setState(() {
-    selectedPage = 'leave';
-  });
-},
-             onEmployees: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'employees';
-  });
-},
-              onProjects: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'projects';
-  });
-},
-              onWorkspace: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'workspace';
-  });
-},
-              onReports: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'reports';
-  });
-},
-              onApprovals: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'approvals';
-  });
-},
-             onChangePassword: () {
-  resetSessionTimer();
-
-  setState(() {
-    selectedPage = 'change_password';
-  });
-},
-              onLogout: logout,
-            ),
-           Expanded(
-  child: buildSelectedPage(),
+        Expanded(
+      child: buildSelectedPage(),
+    ),
+  ],
 ),
-          ],
-        ),
       ),
     );
   }
-  
 }

@@ -1122,244 +1122,284 @@ if (data is Map && data['error'] != null) {
     return value == true;
   }
 
-  Widget _employeeCard(
-    Map<String, dynamic> employee,
+  Widget _employeeTable(
+    List<Map<String, dynamic>> visibleEmployees,
   ) {
-    final id =
-        employee['id']?.toString() ?? '';
-
-    final role =
-        employee['role']?.toString() ??
-            'employee';
-
-    final active =
-        employee['is_active'] == true;
-
-    final requiredHours = int.tryParse(
-          employee['required_weekly_hours']
-                  ?.toString() ??
-              '',
-        ) ??
-        45;
-
     return Container(
-      margin:
-          const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 18,
-        vertical: 16,
-      ),
+      width: double.infinity,
       decoration: BoxDecoration(
         color: surface,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: border,
-        ),
-       boxShadow: const [
-  BoxShadow(
-    color: Color(0x12000000),
-    blurRadius: 24,
-    spreadRadius: 0,
-    offset: Offset(0, 10),
-  ),
-],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: border),
       ),
-      child: Row(
+      child: Column(
         children: [
-          CircleAvatar(
-            radius: 23,
-            backgroundColor: role == 'admin'
-                ? const Color(
-                    0xFF7C3AED,
-                  )
-                : active
-                    ? primary
-                    : Colors.grey,
-            child: Icon(
-              role == 'admin'
-                  ? Icons
-                      .admin_panel_settings
-                  : Icons.person,
-              color: Colors.white,
+          Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFAFAFB),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(12),
+              ),
+              border: Border(
+                bottom: BorderSide(color: border),
+              ),
+            ),
+            child: const Row(
+              children: [
+                Expanded(
+                  flex: 30,
+                  child: Text(
+                    'Employee',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 31,
+                  child: Text(
+                    'Email',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 15,
+                  child: Text(
+                    'This week',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 13,
+                  child: Text(
+                    'Required',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 12,
+                  child: Text(
+                    'Screenshots',
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    'Actions',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        employee['full_name']
-                                ?.toString() ??
-                            'Employee',
-                        overflow:
-                            TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(
-                          color: textPrimary,
-                          fontWeight:
-                              FontWeight.bold,
-                          fontSize: 16,
+          ...List.generate(visibleEmployees.length, (index) {
+            final employee = visibleEmployees[index];
+            final id = employee['id']?.toString() ?? '';
+            final role = employee['role']?.toString() ?? 'employee';
+            final active = employee['is_active'] == true;
+            final requiredHours = int.tryParse(
+                  employee['required_weekly_hours']?.toString() ?? '',
+                ) ??
+                45;
+
+            return Container(
+              height: 54,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                border: index == visibleEmployees.length - 1
+                    ? null
+                    : const Border(
+                        bottom: BorderSide(color: border),
+                      ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 30,
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 15,
+                          backgroundColor: role == 'admin'
+                              ? const Color(0xFF7C3AED)
+                              : active
+                                  ? primary
+                                  : Colors.grey,
+                          child: Icon(
+                            role == 'admin'
+                                ? Icons.admin_panel_settings
+                                : Icons.person,
+                            color: Colors.white,
+                            size: 17,
+                          ),
                         ),
+                        const SizedBox(width: 9),
+                        Flexible(
+                          child: Text(
+                            employee['full_name']?.toString() ?? 'Employee',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: textPrimary,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        _badge(
+                          active ? 'Active' : 'Disabled',
+                          active ? success : danger,
+                        ),
+                        const SizedBox(width: 5),
+                        _badge(
+                          _titleCase(role),
+                          role == 'admin'
+                              ? const Color(0xFF7C3AED)
+                              : primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 31,
+                    child: Text(
+                      employee['email']?.toString() ?? '',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: textSecondary,
+                        fontSize: 11.5,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    _badge(
-                      active
-                          ? 'Active'
-                          : 'Disabled',
-                      active
-                          ? const Color(0xFF16A34A)
-                          : danger,
-                    ),
-                    const SizedBox(width: 6),
-                    _badge(
-                      _titleCase(role),
-                      role == 'admin'
-                          ? const Color(
-                              0xFF7C3AED,
-                            )
-                          :primary,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  employee['email']
-                          ?.toString() ??
-                      '',
-                  style: const TextStyle(
-                    color: textSecondary,
                   ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Wrap(
-              spacing: 16,
-              runSpacing: 6,
-              children: [
-                _metric(
-                  Icons.timelapse,
-                  'This week: ${formatHours(weeklyMinutes[id] ?? 0)}',
-                  primary,
-                ),
-                _metric(
-                  Icons.schedule,
-                  'Required: $requiredHours hrs',
-                  textSecondary,
-                ),
-                _metric(
-                  Icons.photo_camera_outlined,
-                  'Screenshots today: ${screenshotsToday[id] ?? 0}',
-                  textSecondary,
-                ),
-              ],
-            ),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Employee actions',
-            color: Colors.white,
-            onSelected: (value) {
-              switch (value) {
-                case 'details':
-                  showEmployeeDetails(
-                    employee,
-                  );
-                  break;
-
-                case 'edit':
-                  showEditEmployeeDialog(
-                    employee,
-                  );
-                  break;
-
-                case 'reset':
-                  sendPasswordReset(
-                    employee,
-                  );
-                  break;
-
-                case 'status':
-                  toggleStatus(employee);
-                  break;
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'details',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.info_outline,
-                    color: primary,
-                  ),
-                  title:
-                      Text('View details'),
-                  contentPadding:
-                      EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'edit',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.edit_outlined,
-                    color: Color(
-                      0xFF4F46E5,
+                  Expanded(
+                    flex: 15,
+                    child: _metric(
+                      Icons.timelapse,
+                      formatHours(weeklyMinutes[id] ?? 0),
+                      primary,
                     ),
                   ),
-                  title:
-                      Text('Edit employee'),
-                  contentPadding:
-                      EdgeInsets.zero,
-                ),
+                  Expanded(
+                    flex: 13,
+                    child: _metric(
+                      Icons.schedule,
+                      '$requiredHours hrs',
+                      textSecondary,
+                    ),
+                  ),
+                  Expanded(
+                    flex: 12,
+                    child: _metric(
+                      Icons.photo_camera_outlined,
+                      '${screenshotsToday[id] ?? 0}',
+                      textSecondary,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 42,
+                    child: PopupMenuButton<String>(
+                      tooltip: 'Employee actions',
+                      color: Colors.white,
+                      padding: EdgeInsets.zero,
+                      iconSize: 19,
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'details':
+                            showEmployeeDetails(employee);
+                            break;
+                          case 'edit':
+                            showEditEmployeeDialog(employee);
+                            break;
+                          case 'reset':
+                            sendPasswordReset(employee);
+                            break;
+                          case 'status':
+                            toggleStatus(employee);
+                            break;
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'details',
+                          child: ListTile(
+                            leading: Icon(Icons.info_outline, color: primary),
+                            title: Text('View details'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: ListTile(
+                            leading: Icon(
+                              Icons.edit_outlined,
+                              color: Color(0xFF4F46E5),
+                            ),
+                            title: Text('Edit employee'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'reset',
+                          child: ListTile(
+                            leading: Icon(Icons.lock_reset, color: warning),
+                            title: Text('Send password reset'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'status',
+                          child: ListTile(
+                            leading: Icon(
+                              active
+                                  ? Icons.person_off_outlined
+                                  : Icons.person_add_alt,
+                              color: active ? danger : success,
+                            ),
+                            title: Text(
+                              active
+                                  ? 'Disable employee'
+                                  : 'Enable employee',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const PopupMenuItem(
-                value: 'reset',
-                child: ListTile(
-                  leading: Icon(
-                    Icons.lock_reset,
-                    color: warning,
-                  ),
-                  title: Text(
-                    'Send password reset',
-                  ),
-                  contentPadding:
-                      EdgeInsets.zero,
-                ),
-              ),
-              PopupMenuItem(
-                value: 'status',
-                child: ListTile(
-                  leading: Icon(
-                    active
-                        ? Icons
-                            .person_off_outlined
-                        : Icons
-                            .person_add_alt,
-                    color: active
-                        ? danger
-                        : success,
-                  ),
-                  title: Text(
-                    active
-                        ? 'Disable employee'
-                        : 'Enable employee',
-                  ),
-                  contentPadding:
-                      EdgeInsets.zero,
-                ),
-              ),
-            ],
-          ),
+            );
+          }),
         ],
       ),
     );
@@ -1396,16 +1436,16 @@ if (data is Map && data['error'] != null) {
 
   return Container(
     width: double.infinity,
-    margin: const EdgeInsets.only(bottom: 25),
+    margin: const EdgeInsets.only(bottom: 16),
     decoration: BoxDecoration(
       color: surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(13),
       border: Border.all(color: border),
       boxShadow: const [
         BoxShadow(
           color: Color(0x0D000000),
-          blurRadius: 20,
-          offset: Offset(0, 8),
+          blurRadius: 12,
+          offset: Offset(0, 4),
         ),
       ],
     ),
@@ -1428,7 +1468,7 @@ if (data is Map && data['error'] != null) {
             'Employee Work Distribution — This Week',
             style: TextStyle(
               color: textPrimary,
-              fontSize: 16,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -1460,12 +1500,12 @@ if (data is Map && data['error'] != null) {
               );
 
               final chart = SizedBox(
-                width: compact ? 320 : 430,
-                height: 390,
+                width: compact ? 260 : 340,
+                height: 270,
                 child: Center(
                   child: SizedBox(
-                    width: 285,
-                    height: 285,
+                    width: 205,
+                    height: 205,
                     child: CustomPaint(
                       painter: _EmployeeDonutPainter(
                         values: chartEmployees.map((employee) {
@@ -1487,7 +1527,7 @@ if (data is Map && data['error'] != null) {
                               ),
                               style: const TextStyle(
                                 color: textPrimary,
-                                fontSize: 24,
+                                fontSize: 19,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1496,7 +1536,7 @@ if (data is Map && data['error'] != null) {
                               'Total',
                               style: TextStyle(
                                 color: textSecondary,
-                                fontSize: 13,
+                                fontSize: 11,
                               ),
                             ),
                           ],
@@ -1543,7 +1583,7 @@ Widget _employeeChartLegend(
   int totalMinutes,
 ) {
   return Padding(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(14),
     child: Column(
       children: [
         const Row(
@@ -1587,7 +1627,7 @@ Widget _employeeChartLegend(
 
             return Container(
               padding: const EdgeInsets.symmetric(
-                vertical: 13,
+                vertical: 8,
               ),
               decoration: const BoxDecoration(
                 border: Border(
@@ -1607,7 +1647,7 @@ Widget _employeeChartLegend(
                       shape: BoxShape.circle,
                     ),
                   ),
-                  const SizedBox(width: 11),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment:
@@ -1621,7 +1661,7 @@ Widget _employeeChartLegend(
                               TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: textPrimary,
-                            fontSize: 15,
+                            fontSize: 13,
                             fontWeight:
                                 FontWeight.w600,
                           ),
@@ -1637,12 +1677,12 @@ Widget _employeeChartLegend(
                       ],
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Text(
                     _formatClockDuration(minutes),
                     style: const TextStyle(
                       color: textPrimary,
-                      fontSize: 15,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1669,13 +1709,13 @@ String _formatClockDuration(int minutes) {
   ) {
     return Container(
       margin:
-          const EdgeInsets.only(bottom: 12),
+          const EdgeInsets.only(bottom: 8),
       padding:
-          const EdgeInsets.all(16),
+          const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: surface,
         borderRadius:
-            BorderRadius.circular(16),
+            BorderRadius.circular(13),
         border: Border.all(
           color: border,
         ),
@@ -1689,7 +1729,7 @@ String _formatClockDuration(int minutes) {
               color: Colors.white,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment:
@@ -1757,23 +1797,20 @@ String _formatClockDuration(int minutes) {
     Color color,
   ) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 3,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 6,
+        vertical: 2,
       ),
       decoration: BoxDecoration(
-        color:
-            color.withValues(alpha: 0.11),
-        borderRadius:
-            BorderRadius.circular(20),
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         text,
         style: TextStyle(
           color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -1789,16 +1826,16 @@ String _formatClockDuration(int minutes) {
       children: [
         Icon(
           icon,
-          size: 16,
+          size: 14,
           color: color,
         ),
-        const SizedBox(width: 5),
+        const SizedBox(width: 4),
         Text(
           text,
           style: TextStyle(
             color: color,
-            fontWeight:
-                FontWeight.w600,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
@@ -1978,120 +2015,73 @@ String _formatClockDuration(int minutes) {
             style: TextStyle(
               color: textPrimary,
               fontSize: 17,
-              fontWeight:
-                  FontWeight.bold,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
       );
     }
 
-    final visible =
-        filteredEmployees;
+    final visible = filteredEmployees;
 
     return Scaffold(
       backgroundColor: background,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFF1E40AF),
-        foregroundColor:
-            Colors.white,
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 54,
         centerTitle: true,
         title: const Text(
           'Employee Management',
           style: TextStyle(
             color: Colors.white,
-            fontWeight:
-                FontWeight.bold,
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed:
-                loading ? null : loadEmployees,
-            icon:
-                const Icon(Icons.refresh),
+            onPressed: loading ? null : loadEmployees,
+            icon: const Icon(Icons.refresh),
           ),
           IconButton(
             tooltip: 'Add Employee',
-            onPressed: actionLoading
-                ? null
-                : showAddEmployeeDialog,
-            icon: const Icon(
-              Icons.person_add,
-            ),
+            onPressed: actionLoading ? null : showAddEmployeeDialog,
+            icon: const Icon(Icons.person_add),
           ),
         ],
       ),
-      floatingActionButton:
-          FloatingActionButton.extended(
-        backgroundColor: primary,
-        foregroundColor:
-            Colors.white,
-        onPressed: actionLoading
-            ? null
-            : showAddEmployeeDialog,
-        icon: const Icon(
-          Icons.person_add,
-        ),
-        label: const Text(
-          'Add Employee',
-        ),
-      ),
       body: loading
           ? const Center(
-              child:
-                  CircularProgressIndicator(
-                color: primary,
-              ),
+              child: CircularProgressIndicator(color: primary),
             )
           : errorMessage != null
               ? Center(
                   child: Padding(
-                    padding:
-                        const EdgeInsets.all(
-                      30,
-                    ),
+                    padding: const EdgeInsets.all(30),
                     child: Column(
-                      mainAxisSize:
-                          MainAxisSize.min,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(
-                          Icons
-                              .cloud_off_outlined,
+                          Icons.cloud_off_outlined,
                           color: danger,
                           size: 54,
                         ),
-                        const SizedBox(
-                          height: 14,
-                        ),
+                        const SizedBox(height: 14),
                         Text(
                           errorMessage!,
-                          style:
-                              const TextStyle(
-                            color:
-                                textSecondary,
-                          ),
+                          style: const TextStyle(color: textSecondary),
                         ),
-                        const SizedBox(
-                          height: 18,
-                        ),
+                        const SizedBox(height: 18),
                         FilledButton.icon(
-                          style: FilledButton
-                              .styleFrom(
-                            backgroundColor:
-                                primary,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: primary,
                           ),
-                          onPressed:
-                              loadEmployees,
-                          icon: const Icon(
-                            Icons.refresh,
-                          ),
-                          label: const Text(
-                            'Try Again',
-                          ),
+                          onPressed: loadEmployees,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Try Again'),
                         ),
                       ],
                     ),
@@ -2101,191 +2091,175 @@ String _formatClockDuration(int minutes) {
                   color: primary,
                   onRefresh: loadEmployees,
                   child: ListView(
-                    physics:
-                        const AlwaysScrollableScrollPhysics(),
-                    padding:
-                        const EdgeInsets.fromLTRB(
-                      20,
-                      20,
-                      20,
-                      100,
-                    ),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
                     children: [
-                      TextField(
-                        controller:
-                            searchController,
-                        decoration:
-                            InputDecoration(
-                          hintText:
-                              'Search by employee name or email',
-                          prefixIcon:
-                              const Icon(
-                            Icons.search,
-                          ),
-                          suffixIcon:
-                              searchText.isEmpty
-                                  ? null
-                                  : IconButton(
-                                      onPressed:
-                                          () {
-                                        searchController
-                                            .clear();
-                                      },
-                                      icon:
-                                          const Icon(
-                                        Icons
-                                            .close,
-                                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 44,
+                              child: TextField(
+                                controller: searchController,
+                                style: const TextStyle(fontSize: 13),
+                                decoration: InputDecoration(
+                                  hintText: 'Search by employee name or email',
+                                  hintStyle: const TextStyle(
+                                    color: textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.search,
+                                    size: 20,
+                                  ),
+                                  suffixIcon: searchText.isEmpty
+                                      ? null
+                                      : IconButton(
+                                          onPressed: searchController.clear,
+                                          icon: const Icon(
+                                            Icons.close,
+                                            size: 18,
+                                          ),
+                                        ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(color: border),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: primary,
+                                      width: 1.4,
                                     ),
-                          filled: true,
-                          fillColor:
-                              Colors.white,
-                          enabledBorder:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              12,
-                            ),
-                            borderSide:
-                                const BorderSide(
-                              color:
-                                  border,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                          focusedBorder:
-                              OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius
-                                    .circular(
-                              12,
-                            ),
-                            borderSide:
-                                const BorderSide(
-                              color:
-                                  primary,
-                              width: 1.7,
+                          const SizedBox(width: 16),
+                          SizedBox(
+                            width: 360,
+                            height: 44,
+                            child: SegmentedButton<String>(
+                              showSelectedIcon: false,
+                              style: ButtonStyle(
+                                padding: const WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(horizontal: 18),
+                                ),
+                                textStyle: const WidgetStatePropertyAll(
+                                  TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                shape: WidgetStatePropertyAll(
+                                  RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                              segments: const [
+                                ButtonSegment(value: 'all', label: Text('All')),
+                                ButtonSegment(
+                                  value: 'active',
+                                  label: Text('Active'),
+                                ),
+                                ButtonSegment(
+                                  value: 'disabled',
+                                  label: Text('Disabled'),
+                                ),
+                              ],
+                              selected: {statusFilter},
+                              onSelectionChanged: (selection) {
+                                setState(() {
+                                  statusFilter = selection.first;
+                                });
+                              },
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(
-                        height: 14,
-                      ),
-                      Align(
-                        alignment:
-                            Alignment.centerLeft,
-                        child:
-                            SegmentedButton<
-                                String>(
-                          segments: const [
-                            ButtonSegment(
-                              value: 'all',
-                              label:
-                                  Text('All'),
-                              icon: Icon(
-                                Icons
-                                    .people_outline,
-                              ),
-                            ),
-                            ButtonSegment(
-                              value: 'active',
-                              label:
-                                  Text('Active'),
-                              icon: Icon(
-                                Icons
-                                    .check_circle_outline,
-                              ),
-                            ),
-                            ButtonSegment(
-                              value:
-                                  'disabled',
-                              label: Text(
-                                'Disabled',
-                              ),
-                              icon: Icon(
-                                Icons.block,
-                              ),
-                            ),
-                          ],
-                          selected: {
-                            statusFilter,
-                          },
-                          onSelectionChanged:
-                              (selection) {
-                            setState(() {
-                              statusFilter =
-                                  selection.first;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(
-                        height: 25,
-                      ),
-                      if (pendingApprovals
-                          .isNotEmpty) ...[
+                      const SizedBox(height: 14),
+
+                      if (pendingApprovals.isNotEmpty) ...[
                         const Text(
                           'Pending Approval',
-                          style:
-                              TextStyle(
-                            color:
-                                textPrimary,
-                            fontSize: 20,
-                            fontWeight:
-                                FontWeight
-                                    .bold,
+                          style: TextStyle(
+                            color: textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(
-                          height: 12,
-                        ),
-                        ...pendingApprovals
-                            .map(
-                          _pendingCard,
-                        ),
-                        const SizedBox(
-                          height: 25,
-                        ),
+                        const SizedBox(height: 10),
+                        ...pendingApprovals.map(_pendingCard),
+                        const SizedBox(height: 16),
                       ],
+
+                      // Keep the work-distribution section exactly as before.
                       _employeeWorkChart(visible),
 
-const SizedBox(height: 24),
-                      Text(
-                        'Employees (${visible.length})',
-                        style:
-                            const TextStyle(
-                          color: textPrimary,
-                          fontSize: 20,
-                          fontWeight:
-                              FontWeight.bold,
-                        ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text(
+                            'Employees (${visible.length})',
+                            style: const TextStyle(
+                              color: textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          SizedBox(
+                            height: 36,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                              ),
+                              onPressed: actionLoading
+                                  ? null
+                                  : showAddEmployeeDialog,
+                              icon: const Icon(
+                                Icons.person_add,
+                                size: 17,
+                              ),
+                              label: const Text(
+                                'Add Employee',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(
-                        height: 12,
-                      ),
+                      const SizedBox(height: 10),
                       if (visible.isEmpty)
                         const Padding(
-                          padding:
-                              EdgeInsets
-                                  .symmetric(
-                            vertical: 35,
-                          ),
+                          padding: EdgeInsets.symmetric(vertical: 24),
                           child: Center(
                             child: Text(
                               'No employees match the current search or filter.',
-                              style:
-                                  TextStyle(
-                                color:
-                                    textSecondary,
-                              ),
+                              style: TextStyle(color: textSecondary),
                             ),
                           ),
                         )
                       else
-                        ...visible.map(
-                          _employeeCard,
-                        ),
+                        _employeeTable(visible),
                     ],
                   ),
                 ),

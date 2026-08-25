@@ -9,25 +9,21 @@ class KeyboardActivityScreen extends StatefulWidget {
       _KeyboardActivityScreenState();
 }
 
-class _KeyboardActivityScreenState
-    extends State<KeyboardActivityScreen> {
+class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
   bool loading = true;
 
   List<Map<String, dynamic>> activities = [];
 
   String selectedEmployee = 'All Employees';
 
-  // 0 = Today
-// 1 = Yesterday
-// ...
-// 13 = 13 days ago
-int selectedDayIndex = 0;
+  // 0 = Today, 1 = Yesterday, etc.
+  int selectedDayIndex = 0;
 
-static const int maxHistoryDays = 14;
+  static const int maxHistoryDays = 14;
 
-  // Hours inside this set are collapsed.
-  // By default all hours are OPEN.
-  final Set<String> _collapsedHours = {};
+  // Hours are CLOSED by default.
+  // Only hours inside this set are expanded.
+  final Set<String> _expandedHours = {};
 
   bool get isAdmin =>
       currentUserRole.trim().toLowerCase() == 'admin';
@@ -52,8 +48,8 @@ static const int maxHistoryDays = 14;
     );
 
     return today.subtract(
-  Duration(days: selectedDayIndex),
-);
+      Duration(days: selectedDayIndex),
+    );
   }
 
   String get selectedDayLabel {
@@ -74,8 +70,19 @@ static const int maxHistoryDays = 14;
       'December',
     ];
 
-    return '${months[date.month - 1]} '
-        '${date.day}, ${date.year}';
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  String get quickDayLabel {
+    if (selectedDayIndex == 0) {
+      return 'Today';
+    }
+
+    if (selectedDayIndex == 1) {
+      return 'Yesterday';
+    }
+
+    return '$selectedDayIndex days ago';
   }
 
   // ============================================================
@@ -91,7 +98,6 @@ static const int maxHistoryDays = 14;
 
     try {
       final dayStart = selectedDay;
-
       final dayEnd = dayStart.add(
         const Duration(days: 1),
       );
@@ -164,25 +170,20 @@ static const int maxHistoryDays = 14;
 
       setState(() {
         activities =
-            List<Map<String, dynamic>>.from(
-          response,
-        );
+            List<Map<String, dynamic>>.from(response);
 
         loading = false;
 
-        if (selectedEmployee !=
-                'All Employees' &&
-            !employeeNames.contains(
-              selectedEmployee,
-            )) {
-          selectedEmployee =
-              'All Employees';
+        // Always start closed after loading.
+        _expandedHours.clear();
+
+        if (selectedEmployee != 'All Employees' &&
+            !employeeNames.contains(selectedEmployee)) {
+          selectedEmployee = 'All Employees';
         }
       });
     } catch (e) {
-      debugPrint(
-        'Activity load error: $e',
-      );
+      debugPrint('Activity load error: $e');
 
       if (!mounted) return;
 
@@ -222,8 +223,7 @@ static const int maxHistoryDays = 14;
       return activities;
     }
 
-    if (selectedEmployee ==
-        'All Employees') {
+    if (selectedEmployee == 'All Employees') {
       return activities;
     }
 
@@ -235,8 +235,7 @@ static const int maxHistoryDays = 14;
                     .trim() ??
                 '';
 
-        return name ==
-            selectedEmployee;
+        return name == selectedEmployee;
       },
     ).toList();
   }
@@ -245,9 +244,7 @@ static const int maxHistoryDays = 14;
   // HELPERS
   // ============================================================
 
-  DateTime? parseTime(
-    dynamic value,
-  ) {
+  DateTime? parseTime(dynamic value) {
     if (value == null) {
       return null;
     }
@@ -257,9 +254,7 @@ static const int maxHistoryDays = 14;
     )?.toLocal();
   }
 
-  int readInt(
-    dynamic value,
-  ) {
+  int readInt(dynamic value) {
     if (value == null) {
       return 0;
     }
@@ -278,61 +273,39 @@ static const int maxHistoryDays = 14;
         0;
   }
 
-  String formatTime(
-    DateTime date,
-  ) {
-    final rawHour =
-        date.hour % 12;
+  String formatTime(DateTime date) {
+    final rawHour = date.hour % 12;
+    final hour = rawHour == 0 ? 12 : rawHour;
 
-    final hour =
-        rawHour == 0
-            ? 12
-            : rawHour;
-
-    final minute =
-        date.minute
-            .toString()
-            .padLeft(
-              2,
-              '0',
-            );
+    final minute = date.minute
+        .toString()
+        .padLeft(2, '0');
 
     final amPm =
-        date.hour >= 12
-            ? 'PM'
-            : 'AM';
+        date.hour >= 12 ? 'PM' : 'AM';
 
     return '$hour:$minute $amPm';
   }
 
-  String formatHourOnly(
-    DateTime date,
-  ) {
-    final rawHour =
-        date.hour % 12;
-
-    final hour =
-        rawHour == 0
-            ? 12
-            : rawHour;
+  String formatHourOnly(DateTime date) {
+    final rawHour = date.hour % 12;
+    final hour = rawHour == 0 ? 12 : rawHour;
 
     final amPm =
-        date.hour >= 12
-            ? 'PM'
-            : 'AM';
+        date.hour >= 12 ? 'PM' : 'AM';
 
     return '$hour $amPm';
   }
 
   // ============================================================
-  // FIXED 5-MINUTE SLOT
+  // FIXED 15-MINUTE SLOT
   // ============================================================
 
-  DateTime getFiveMinuteStart(
+  DateTime getFifteenMinuteStart(
     DateTime time,
   ) {
     final minute =
-        (time.minute ~/ 5) * 5;
+        (time.minute ~/ 15) * 15;
 
     return DateTime(
       time.year,
@@ -343,32 +316,28 @@ static const int maxHistoryDays = 14;
     );
   }
 
-  String formatFiveMinuteInterval(
+  String formatFifteenMinuteInterval(
     DateTime start,
   ) {
-    final end =
-        start.add(
-      const Duration(minutes: 5),
+    final end = start.add(
+      const Duration(minutes: 15),
     );
 
-    return '${formatTime(start)}  –  '
-        '${formatTime(end)}';
+    return '${formatTime(start)} - ${formatTime(end)}';
   }
 
   String formatHourGroup(
     DateTime start,
   ) {
-    final end =
-        start.add(
+    final end = start.add(
       const Duration(hours: 1),
     );
 
-    return '${formatHourOnly(start)} – '
-        '${formatHourOnly(end)}';
+    return '${formatHourOnly(start)} - ${formatHourOnly(end)}';
   }
 
   // ============================================================
-  // BUILD 5-MINUTE SLOTS
+  // BUILD 15-MINUTE SLOTS
   // ============================================================
 
   List<_HourActivityGroup>
@@ -378,8 +347,7 @@ static const int maxHistoryDays = 14;
 
     for (final activity
         in filteredActivities) {
-      final sampleStart =
-          parseTime(
+      final sampleStart = parseTime(
         activity['sample_start'],
       );
 
@@ -399,7 +367,7 @@ static const int maxHistoryDays = 14;
               '';
 
       final slotStart =
-          getFiveMinuteStart(
+          getFifteenMinuteStart(
         sampleStart,
       );
 
@@ -407,31 +375,22 @@ static const int maxHistoryDays = 14;
           '${slotStart.toIso8601String()}_$employeeId';
 
       if (!slots.containsKey(key)) {
-        slots[key] =
-            _ActivitySlot(
-          slotStart:
-              slotStart,
-          employeeName:
-              employee,
-          employeeId:
-              employeeId,
-          keyboard:
-              0,
-          mouse:
-              0,
+        slots[key] = _ActivitySlot(
+          slotStart: slotStart,
+          employeeName: employee,
+          employeeId: employeeId,
+          keyboard: 0,
+          mouse: 0,
         );
       }
 
-      final existing =
-          slots[key]!;
+      final existing = slots[key]!;
 
-      existing.keyboard +=
-          readInt(
+      existing.keyboard += readInt(
         activity['keyboard_presses'],
       );
 
-      existing.mouse +=
-          readInt(
+      existing.mouse += readInt(
         activity['mouse_movements'],
       );
     }
@@ -439,10 +398,8 @@ static const int maxHistoryDays = 14;
     final Map<DateTime, List<_ActivitySlot>>
         hourMap = {};
 
-    for (final slot
-        in slots.values) {
-      final hourStart =
-          DateTime(
+    for (final slot in slots.values) {
+      final hourStart = DateTime(
         slot.slotStart.year,
         slot.slotStart.month,
         slot.slotStart.day,
@@ -454,17 +411,14 @@ static const int maxHistoryDays = 14;
         () => [],
       );
 
-      hourMap[hourStart]!.add(
-        slot,
-      );
+      hourMap[hourStart]!.add(slot);
     }
 
     final hourKeys =
         hourMap.keys.toList();
 
     hourKeys.sort(
-      (a, b) =>
-          b.compareTo(a),
+      (a, b) => b.compareTo(a),
     );
 
     final result =
@@ -486,8 +440,7 @@ static const int maxHistoryDays = 14;
             return timeCompare;
           }
 
-          return a.employeeName
-              .compareTo(
+          return a.employeeName.compareTo(
             b.employeeName,
           );
         },
@@ -496,25 +449,17 @@ static const int maxHistoryDays = 14;
       int keyboardTotal = 0;
       int mouseTotal = 0;
 
-      for (final slot
-          in hourSlots) {
-        keyboardTotal +=
-            slot.keyboard;
-
-        mouseTotal +=
-            slot.mouse;
+      for (final slot in hourSlots) {
+        keyboardTotal += slot.keyboard;
+        mouseTotal += slot.mouse;
       }
 
       result.add(
         _HourActivityGroup(
-          hourStart:
-              hourStart,
-          slots:
-              hourSlots,
-          keyboardTotal:
-              keyboardTotal,
-          mouseTotal:
-              mouseTotal,
+          hourStart: hourStart,
+          slots: hourSlots,
+          keyboardTotal: keyboardTotal,
+          mouseTotal: mouseTotal,
         ),
       );
     }
@@ -523,32 +468,36 @@ static const int maxHistoryDays = 14;
   }
 
   int get dailyKeyboardTotal {
-  return groupedActivities.fold(
-    0,
-    (total, group) => total + group.keyboardTotal,
-  );
-}
+    return groupedActivities.fold(
+      0,
+      (total, group) =>
+          total + group.keyboardTotal,
+    );
+  }
 
-int get dailyMouseTotal {
-  return groupedActivities.fold(
-    0,
-    (total, group) => total + group.mouseTotal,
-  );
-}
+  int get dailyMouseTotal {
+    return groupedActivities.fold(
+      0,
+      (total, group) =>
+          total + group.mouseTotal,
+    );
+  }
 
-int get dailyActivityTotal {
-  return dailyKeyboardTotal + dailyMouseTotal;
-}
+  int get dailyActivityTotal {
+    return dailyKeyboardTotal +
+        dailyMouseTotal;
+  }
 
-int get dailyIntervalCount {
-  return groupedActivities.fold(
-    0,
-    (total, group) => total + group.slots.length,
-  );
-}
+  int get dailyIntervalCount {
+    return groupedActivities.fold(
+      0,
+      (total, group) =>
+          total + group.slots.length,
+    );
+  }
 
   // ============================================================
-  // EXPAND / COLLAPSE HOUR
+  // EXPAND / COLLAPSE
   // ============================================================
 
   String hourKey(
@@ -560,7 +509,7 @@ int get dailyIntervalCount {
   bool isHourExpanded(
     DateTime hourStart,
   ) {
-    return !_collapsedHours.contains(
+    return _expandedHours.contains(
       hourKey(hourStart),
     );
   }
@@ -568,14 +517,13 @@ int get dailyIntervalCount {
   void toggleHour(
     DateTime hourStart,
   ) {
-    final key =
-        hourKey(hourStart);
+    final key = hourKey(hourStart);
 
     setState(() {
-      if (_collapsedHours.contains(key)) {
-        _collapsedHours.remove(key);
+      if (_expandedHours.contains(key)) {
+        _expandedHours.remove(key);
       } else {
-        _collapsedHours.add(key);
+        _expandedHours.add(key);
       }
     });
   }
@@ -586,140 +534,152 @@ int get dailyIntervalCount {
 
   Future<void>
       goToPreviousDay() async {
-    if (selectedDayIndex >= maxHistoryDays) {
-  return;
-}
+    if (selectedDayIndex >=
+        maxHistoryDays) {
+      return;
+    }
 
-setState(() {
-  selectedDayIndex++;
-  selectedEmployee = 'All Employees';
+    setState(() {
+      selectedDayIndex++;
+      selectedEmployee =
+          'All Employees';
+      _expandedHours.clear();
+    });
 
-  _collapsedHours.clear();
-});
     await loadActivities();
   }
 
   Future<void>
       goToNextDay() async {
     if (selectedDayIndex <= 0) {
-  return;
-}
+      return;
+    }
 
-setState(() {
-  selectedDayIndex--;
-  selectedEmployee = 'All Employees';
+    setState(() {
+      selectedDayIndex--;
+      selectedEmployee =
+          'All Employees';
+      _expandedHours.clear();
+    });
 
-  _collapsedHours.clear();
-});
+    await loadActivities();
+  }
+
+  Future<void> selectQuickDay(
+    int dayIndex,
+  ) async {
+    if (dayIndex < 0 ||
+        dayIndex > maxHistoryDays) {
+      return;
+    }
+
+    setState(() {
+      selectedDayIndex = dayIndex;
+      selectedEmployee =
+          'All Employees';
+      _expandedHours.clear();
+    });
 
     await loadActivities();
   }
 
   // ============================================================
-  // DATE SELECTOR
+  // DATE SELECTOR - LARGE
   // ============================================================
 
   Widget buildDateSelector() {
-   final canGoPrevious =
-    selectedDayIndex < maxHistoryDays;
+    final canGoPrevious =
+        selectedDayIndex <
+            maxHistoryDays;
 
-final canGoNext =
-    selectedDayIndex > 0;
+    final canGoNext =
+        selectedDayIndex > 0;
 
     return Container(
-      height: 88,
+      height: 62,
       padding:
           const EdgeInsets.symmetric(
-        horizontal: 20,
+        horizontal: 12,
       ),
       decoration: BoxDecoration(
-        color:
-            const Color(
+        color: const Color(
           0xFFF8F5F1,
         ),
         borderRadius:
-            BorderRadius.circular(
-          18,
-        ),
-        border:
-            Border.all(
-          color:
-              const Color(
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(
             0xFFE5E7EB,
           ),
         ),
       ),
-      child:
-          Row(
+      child: Row(
         children: [
-          IconButton(
-            onPressed:
-                canGoPrevious
-                    ? goToPreviousDay
-                    : null,
-            icon:
-                const Icon(
-              Icons.chevron_left,
+          SizedBox(
+            width: 40,
+            height: 34,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              onPressed:
+                  canGoPrevious
+                      ? goToPreviousDay
+                      : null,
+              icon: const Icon(
+                Icons.chevron_left,
+                size: 24,
+              ),
             ),
           ),
-          const SizedBox(
-            width: 8,
-          ),
+          const SizedBox(width: 8),
           Expanded(
-            child:
-                Container(
-              height: 58,
+            child: Container(
+              height: 44,
               padding:
                   const EdgeInsets
                       .symmetric(
-                horizontal: 20,
+                horizontal: 18,
               ),
               decoration:
                   BoxDecoration(
-                color:
-                    Colors.white,
+                color: Colors.white,
                 borderRadius:
-                    BorderRadius
-                        .circular(
-                  14,
+                    BorderRadius.circular(
+                  10,
                 ),
-                border:
-                    Border.all(
-                  color:
-                      const Color(
+                border: Border.all(
+                  color: const Color(
                     0xFFE2E8F0,
                   ),
                 ),
               ),
-              child:
-                  Row(
+              child: Row(
                 children: [
                   const Icon(
                     Icons
                         .calendar_today_rounded,
-                    size:
-                        21,
-                    color:
-                        Color(
+                    size: 18,
+                    color: Color(
                       0xFF64748B,
                     ),
                   ),
                   const SizedBox(
-                    width:
-                        14,
+                    width: 14,
                   ),
-                  Text(
-                    selectedDayLabel,
-                    style:
-                        const TextStyle(
-                      fontSize:
-                          16,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color:
-                          Color(
-                        0xFF1F2937,
+                  Expanded(
+                    child: Text(
+                      selectedDayLabel,
+                      overflow:
+                          TextOverflow
+                              .ellipsis,
+                      style:
+                          const TextStyle(
+                        fontSize: 16,
+                        fontWeight:
+                            FontWeight
+                                .w700,
+                        color: Color(
+                          0xFF1F2937,
+                        ),
                       ),
                     ),
                   ),
@@ -727,149 +687,20 @@ final canGoNext =
               ),
             ),
           ),
-          const SizedBox(
-            width: 8,
-          ),
-          IconButton(
-            onPressed:
-                canGoNext
-                    ? goToNextDay
-                    : null,
-            icon:
-                const Icon(
-              Icons.chevron_right,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // ADMIN EMPLOYEE FILTER - UNCHANGED
-  // ============================================================
-
-  Widget buildEmployeeFilter() {
-    return Container(
-      height: 88,
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal: 20,
-      ),
-      decoration: BoxDecoration(
-        color:
-            const Color(
-          0xFFF8F5F1,
-        ),
-        borderRadius:
-            BorderRadius.circular(
-          18,
-        ),
-        border:
-            Border.all(
-          color:
-              const Color(
-            0xFFE5E7EB,
-          ),
-        ),
-      ),
-      child:
-          Row(
-        children: [
-          const Icon(
-            Icons
-                .person_outline_rounded,
-            color:
-                Color(
-              0xFF64748B,
-            ),
-          ),
-          const SizedBox(
-            width:
-                12,
-          ),
-          const Text(
-            'Employee',
-            style:
-                TextStyle(
-              fontSize:
-                  15,
-              fontWeight:
-                  FontWeight
-                      .w600,
-            ),
-          ),
-          const SizedBox(
-            width:
-                16,
-          ),
-          Expanded(
-            child:
-                DropdownButtonFormField<
-                    String>(
-              value:
-                  selectedEmployee,
-              isExpanded:
-                  true,
-              decoration:
-                  InputDecoration(
-                filled:
-                    true,
-                fillColor:
-                    Colors.white,
-                contentPadding:
-                    const EdgeInsets
-                        .symmetric(
-                  horizontal:
-                      16,
-                  vertical:
-                      14,
-                ),
-                border:
-                    OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius
-                          .circular(
-                    12,
-                  ),
-                ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 40,
+            height: 34,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              onPressed:
+                  canGoNext
+                      ? goToNextDay
+                      : null,
+              icon: const Icon(
+                Icons.chevron_right,
+                size: 24,
               ),
-              items: [
-                const DropdownMenuItem(
-                  value:
-                      'All Employees',
-                  child:
-                      Text(
-                    'All Employees',
-                  ),
-                ),
-                ...employeeNames.map(
-                  (
-                    employee,
-                  ) {
-                    return DropdownMenuItem(
-                      value:
-                          employee,
-                      child:
-                          Text(
-                        employee,
-                      ),
-                    );
-                  },
-                ),
-              ],
-              onChanged:
-                  (value) {
-                if (value ==
-                    null) {
-                  return;
-                }
-
-                setState(() {
-                  selectedEmployee =
-                      value;
-                });
-              },
             ),
           ),
         ],
@@ -878,7 +709,7 @@ final canGoNext =
   }
 
   // ============================================================
-  // SUMMARY BADGE
+  // SUMMARY BADGE - LARGE
   // ============================================================
 
   Widget buildSummaryBadge({
@@ -887,66 +718,50 @@ final canGoNext =
     required int value,
   }) {
     return Container(
+      height: 34,
       padding:
           const EdgeInsets.symmetric(
         horizontal: 14,
-        vertical: 10,
       ),
       decoration: BoxDecoration(
-        color:
-            Colors.white,
+        color: Colors.white,
         borderRadius:
-            BorderRadius.circular(
-          10,
-        ),
-        border:
-            Border.all(
-          color:
-              const Color(
+            BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(
             0xFFE2E8F0,
           ),
         ),
       ),
-      child:
-          Row(
-        mainAxisSize:
-            MainAxisSize.min,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             icon,
-            size:
-                16,
-            color:
-                const Color(
+            size: 16,
+            color: const Color(
               0xFF64748B,
             ),
           ),
-          const SizedBox(
-            width:
-                8,
-          ),
+          const SizedBox(width: 8),
           Text(
             '$label: ',
-            style:
-                const TextStyle(
-              color:
-                  Color(
+            style: const TextStyle(
+              color: Color(
                 0xFF64748B,
               ),
-              fontSize:
-                  13,
+              fontSize: 12,
+              fontWeight:
+                  FontWeight.w500,
             ),
           ),
           Text(
             '$value',
-            style:
-                const TextStyle(
+            style: const TextStyle(
               fontWeight:
-                  FontWeight.bold,
-              fontSize:
-                  14,
-              color:
-                  Color(
+                  FontWeight.w600,
+              fontSize: 13,
+              color: Color(
                 0xFF0F172A,
               ),
             ),
@@ -957,7 +772,208 @@ final canGoNext =
   }
 
   // ============================================================
-  // HOUR HEADER WITH ORANGE EXPAND / COLLAPSE ARROW
+  // ADMIN EMPLOYEE FILTER
+  // ============================================================
+
+  Widget buildEmployeeFilter() {
+    return SizedBox(
+      width: 220,
+      height: 34,
+      child:
+          DropdownButtonFormField<
+              String>(
+        value: selectedEmployee,
+        isExpanded: true,
+        isDense: true,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(
+            0xFF1F2937,
+          ),
+          fontWeight:
+              FontWeight.w600,
+        ),
+        decoration:
+            InputDecoration(
+          filled: true,
+          fillColor: Colors.white,
+          prefixIcon: const Icon(
+            Icons.people_alt_rounded,
+            size: 17,
+            color: Color(
+              0xFF64748B,
+            ),
+          ),
+          contentPadding:
+              const EdgeInsets
+                  .symmetric(
+            horizontal: 12,
+            vertical: 11,
+          ),
+          enabledBorder:
+              OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(
+              10,
+            ),
+            borderSide:
+                const BorderSide(
+              color: Color(
+                0xFFE2E8F0,
+              ),
+            ),
+          ),
+          focusedBorder:
+              OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(
+              10,
+            ),
+            borderSide:
+                const BorderSide(
+              color: Color(
+                0xFFF97316,
+              ),
+            ),
+          ),
+        ),
+        items: [
+          const DropdownMenuItem(
+            value:
+                'All Employees',
+            child: Text(
+              'All Employees',
+            ),
+          ),
+          ...employeeNames.map(
+            (employee) {
+              return DropdownMenuItem(
+                value: employee,
+                child: Text(
+                  employee,
+                  overflow:
+                      TextOverflow
+                          .ellipsis,
+                ),
+              );
+            },
+          ),
+        ],
+        onChanged: (value) {
+          if (value == null) {
+            return;
+          }
+
+          setState(() {
+            selectedEmployee =
+                value;
+            _expandedHours.clear();
+          });
+        },
+      ),
+    );
+  }
+
+  // ============================================================
+  // QUICK DAY FILTER
+  // ============================================================
+
+  Widget buildQuickDayFilter() {
+    return SizedBox(
+      width: 175,
+      height: 34,
+      child:
+          DropdownButtonFormField<
+              int>(
+        value: selectedDayIndex,
+        isExpanded: true,
+        isDense: true,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(
+            0xFF1F2937,
+          ),
+          fontWeight:
+              FontWeight.w600,
+        ),
+        decoration:
+            InputDecoration(
+          filled: true,
+          fillColor: Colors.white,
+          prefixIcon: const Icon(
+            Icons
+                .calendar_month_rounded,
+            size: 17,
+            color: Color(
+              0xFF64748B,
+            ),
+          ),
+          contentPadding:
+              const EdgeInsets
+                  .symmetric(
+            horizontal: 12,
+            vertical: 11,
+          ),
+          enabledBorder:
+              OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(
+              10,
+            ),
+            borderSide:
+                const BorderSide(
+              color: Color(
+                0xFFE2E8F0,
+              ),
+            ),
+          ),
+          focusedBorder:
+              OutlineInputBorder(
+            borderRadius:
+                BorderRadius.circular(
+              10,
+            ),
+            borderSide:
+                const BorderSide(
+              color: Color(
+                0xFFF97316,
+              ),
+            ),
+          ),
+        ),
+        items: List.generate(
+          maxHistoryDays + 1,
+          (index) {
+            String label;
+
+            if (index == 0) {
+              label = 'Today';
+            } else if (index == 1) {
+              label = 'Yesterday';
+            } else {
+              label =
+                  '$index days ago';
+            }
+
+            return DropdownMenuItem(
+              value: index,
+              child: Text(label),
+            );
+          },
+        ),
+        onChanged: (value) {
+          if (value == null) {
+            return;
+          }
+
+          selectQuickDay(value);
+        },
+      ),
+    );
+  }
+
+  // ============================================================
+  // LARGE HOUR HEADER
   // ============================================================
 
   Widget buildHourHeader(
@@ -975,157 +991,148 @@ final canGoNext =
         );
       },
       child: Container(
+        height: 68,
         padding:
             const EdgeInsets.symmetric(
           horizontal: 20,
-          vertical: 18,
         ),
-        color:
-            const Color(
+        color: const Color(
           0xFFFFF7ED,
         ),
-        child:
-            Row(
+        child: Row(
           children: [
-            // ------------------------------------------
-            // ORANGE EXPAND / COLLAPSE ARROW
-            // ------------------------------------------
-
             AnimatedRotation(
               turns:
-                  expanded
-                      ? 0.25
-                      : 0,
+                  expanded ? 0.25 : 0,
               duration:
                   const Duration(
                 milliseconds: 150,
               ),
-              child:
-                  const Icon(
-                Icons.chevron_right_rounded,
-                size:
-                    27,
-                color:
-                    Color(
+              child: const Icon(
+                Icons
+                    .chevron_right_rounded,
+                size: 24,
+                color: Color(
                   0xFFF97316,
                 ),
               ),
             ),
 
-            const SizedBox(
-              width:
-                  8,
+            const SizedBox(width: 12),
+
+            const Icon(
+              Icons.access_time_rounded,
+              size: 24,
+              color: Color(
+                0xFFF97316,
+              ),
             ),
 
-            // ------------------------------------------
-            // CLOCK ICON
-            // ------------------------------------------
+            const SizedBox(width: 18),
+
+            Text(
+              formatHourGroup(
+                group.hourStart,
+              ),
+              style: const TextStyle(
+                fontWeight:
+                    FontWeight.w600,
+                fontSize: 16,
+                color: Color(
+                  0xFF1F2937,
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 28),
+
+            Text(
+              '(${group.slots.length} intervals)',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight:
+                    FontWeight.w500,
+                color: Color(
+                  0xFF64748B,
+                ),
+              ),
+            ),
+
+            const Spacer(),
+
+            const Icon(
+              Icons.keyboard_rounded,
+              size: 18,
+              color: Color(
+                0xFF64748B,
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            Text(
+              '${group.keyboardTotal}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight:
+                    FontWeight.w600,
+                color: Color(
+                  0xFF0F172A,
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 28),
 
             Container(
-              width:
-                  40,
-              height:
-                  40,
-              decoration:
-                  BoxDecoration(
-                color:
-                    const Color(
-                  0xFFFFEDD5,
-                ),
-                borderRadius:
-                    BorderRadius
-                        .circular(
-                  11,
+              width: 1,
+              height: 28,
+              color: const Color(
+                0xFFE2E8F0,
+              ),
+            ),
+
+            const SizedBox(width: 28),
+
+            const Icon(
+              Icons.mouse_rounded,
+              size: 18,
+              color: Color(
+                0xFF64748B,
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            Text(
+              '${group.mouseTotal}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight:
+                    FontWeight.w600,
+                color: Color(
+                  0xFF0F172A,
                 ),
               ),
-              child:
-                  const Icon(
+            ),
+
+            const SizedBox(width: 18),
+
+            AnimatedRotation(
+              turns:
+                  expanded ? 0.5 : 0,
+              duration:
+                  const Duration(
+                milliseconds: 150,
+              ),
+              child: const Icon(
                 Icons
-                    .access_time_rounded,
-                color:
-                    Color(
+                    .keyboard_arrow_down_rounded,
+                size: 24,
+                color: Color(
                   0xFFF97316,
                 ),
-                size:
-                    21,
               ),
-            ),
-
-            const SizedBox(
-              width:
-                  14,
-            ),
-
-            Expanded(
-              child:
-                  Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
-                children: [
-                  Text(
-                    formatHourGroup(
-                      group.hourStart,
-                    ),
-                    style:
-                        const TextStyle(
-                      fontWeight:
-                          FontWeight
-                              .bold,
-                      fontSize:
-                          18,
-                      color:
-                          Color(
-                        0xFF1F2937,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(
-                    height:
-                        4,
-                  ),
-                  Text(
-                    '${group.slots.length} '
-                    '5-minute intervals',
-                    style:
-                        const TextStyle(
-                      fontSize:
-                          13,
-                      color:
-                          Color(
-                        0xFF64748B,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ------------------------------------------
-            // TOTALS STAY VISIBLE EVEN WHEN COLLAPSED
-            // ------------------------------------------
-
-            buildSummaryBadge(
-              icon:
-                  Icons.keyboard_rounded,
-              label:
-                  'Keyboard',
-              value:
-                  group.keyboardTotal,
-            ),
-
-            const SizedBox(
-              width:
-                  10,
-            ),
-
-            buildSummaryBadge(
-              icon:
-                  Icons.mouse_rounded,
-              label:
-                  'Mouse',
-              value:
-                  group.mouseTotal,
             ),
           ],
         ),
@@ -1134,98 +1141,76 @@ final canGoNext =
   }
 
   // ============================================================
-  // COLUMN HEADER
+  // TABLE HEADER
   // ============================================================
 
   Widget buildTableHeader() {
     return Container(
+      height: 34,
       padding:
           const EdgeInsets.symmetric(
         horizontal: 20,
-        vertical: 14,
       ),
-      color:
-          const Color(
+      color: const Color(
         0xFFF8FAFC,
       ),
-      child:
-          const Row(
+      child: const Row(
         children: [
           Expanded(
-            flex:
-                3,
-            child:
-                Text(
+            flex: 3,
+            child: Text(
               'EMPLOYEE',
-              style:
-                  TextStyle(
+              style: TextStyle(
                 fontWeight:
-                    FontWeight.bold,
-                fontSize:
-                    12,
-                color:
-                    Color(
+                    FontWeight.w600,
+                fontSize: 10,
+                color: Color(
                   0xFF64748B,
                 ),
               ),
             ),
           ),
           Expanded(
-            flex:
-                3,
-            child:
-                Text(
-              '5-MIN INTERVAL',
-              style:
-                  TextStyle(
+            flex: 3,
+            child: Text(
+              '15-MIN INTERVAL',
+              style: TextStyle(
                 fontWeight:
-                    FontWeight.bold,
-                fontSize:
-                    12,
-                color:
-                    Color(
+                    FontWeight.w600,
+                fontSize: 10,
+                color: Color(
                   0xFF64748B,
                 ),
               ),
             ),
           ),
           Expanded(
-            flex:
-                2,
-            child:
-                Text(
+            flex: 2,
+            child: Text(
               'KEYBOARD',
               textAlign:
                   TextAlign.right,
-              style:
-                  TextStyle(
+              style: TextStyle(
                 fontWeight:
-                    FontWeight.bold,
-                fontSize:
-                    12,
-                color:
-                    Color(
+                    FontWeight.w600,
+                fontSize: 10,
+                color: Color(
                   0xFF64748B,
                 ),
               ),
             ),
           ),
           Expanded(
-            flex:
-                2,
-            child:
-                Text(
+            flex: 2,
+            child: Text(
               'MOUSE',
               textAlign:
                   TextAlign.right,
-              style:
-                  TextStyle(
+              style: TextStyle(
                 fontWeight:
-                    FontWeight.bold,
-                fontSize:
-                    12,
-                color:
-                    Color(
+                    FontWeight.w600,
+                fontSize: 10,
+                color: Color(
                   0xFF64748B,
                 ),
               ),
@@ -1237,75 +1222,48 @@ final canGoNext =
   }
 
   // ============================================================
-  // SLOT ROW - SAME AS BEFORE
+  // 15-MIN SLOT ROW
   // ============================================================
 
   Widget buildSlotRow(
     _ActivitySlot slot,
   ) {
     return Container(
+      height: 34,
       padding:
           const EdgeInsets.symmetric(
         horizontal: 20,
-        vertical: 17,
       ),
       decoration:
           const BoxDecoration(
-        color:
-            Colors.white,
-        border:
-            Border(
-          top:
-              BorderSide(
-            color:
-                Color(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: Color(
               0xFFE2E8F0,
             ),
           ),
         ),
       ),
-      child:
-          Row(
+      child: Row(
         children: [
           Expanded(
-            flex:
-                3,
-            child:
-                Row(
+            flex: 3,
+            child: Row(
               children: [
-                Container(
-                  width:
-                      36,
-                  height:
-                      36,
-                  decoration:
-                      const BoxDecoration(
-                    color:
-                        Color(
-                      0xFFF1F5F9,
-                    ),
-                    shape:
-                        BoxShape.circle,
-                  ),
-                  child:
-                      const Icon(
-                    Icons
-                        .person_outline_rounded,
-                    size:
-                        18,
-                    color:
-                        Color(
-                      0xFF64748B,
-                    ),
+                const Icon(
+                  Icons
+                      .person_outline_rounded,
+                  size: 17,
+                  color: Color(
+                    0xFF64748B,
                   ),
                 ),
                 const SizedBox(
-                  width:
-                      12,
+                  width: 8,
                 ),
                 Expanded(
-                  child:
-                      Text(
+                  child: Text(
                     slot.employeeName,
                     overflow:
                         TextOverflow
@@ -1313,10 +1271,9 @@ final canGoNext =
                     style:
                         const TextStyle(
                       fontWeight:
-                          FontWeight
-                              .w600,
-                      color:
-                          Color(
+                          FontWeight.w600,
+                      fontSize: 12,
+                      color: Color(
                         0xFF1F2937,
                       ),
                     ),
@@ -1327,21 +1284,16 @@ final canGoNext =
           ),
 
           Expanded(
-            flex:
-                3,
-            child:
-                Text(
-              formatFiveMinuteInterval(
+            flex: 3,
+            child: Text(
+              formatFifteenMinuteInterval(
                 slot.slotStart,
               ),
-              style:
-                  const TextStyle(
-                fontSize:
-                    14,
+              style: const TextStyle(
+                fontSize: 13,
                 fontWeight:
                     FontWeight.w500,
-                color:
-                    Color(
+                color: Color(
                   0xFF475569,
                 ),
               ),
@@ -1349,80 +1301,36 @@ final canGoNext =
           ),
 
           Expanded(
-            flex:
-                2,
-            child:
-                Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.end,
-              children: [
-                const Icon(
-                  Icons.keyboard_rounded,
-                  size:
-                      16,
-                  color:
-                      Color(
-                    0xFF64748B,
-                  ),
+            flex: 2,
+            child: Text(
+              '${slot.keyboard}',
+              textAlign:
+                  TextAlign.right,
+              style: const TextStyle(
+                fontWeight:
+                    FontWeight.w600,
+                fontSize: 12,
+                color: Color(
+                  0xFF0F172A,
                 ),
-                const SizedBox(
-                  width:
-                      8,
-                ),
-                Text(
-                  '${slot.keyboard}',
-                  style:
-                      const TextStyle(
-                    fontWeight:
-                        FontWeight.bold,
-                    fontSize:
-                        16,
-                    color:
-                        Color(
-                      0xFF0F172A,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
 
           Expanded(
-            flex:
-                2,
-            child:
-                Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.end,
-              children: [
-                const Icon(
-                  Icons.mouse_rounded,
-                  size:
-                      16,
-                  color:
-                      Color(
-                    0xFF64748B,
-                  ),
+            flex: 2,
+            child: Text(
+              '${slot.mouse}',
+              textAlign:
+                  TextAlign.right,
+              style: const TextStyle(
+                fontWeight:
+                    FontWeight.w600,
+                fontSize: 12,
+                color: Color(
+                  0xFF0F172A,
                 ),
-                const SizedBox(
-                  width:
-                      8,
-                ),
-                Text(
-                  '${slot.mouse}',
-                  style:
-                      const TextStyle(
-                    fontWeight:
-                        FontWeight.bold,
-                    fontSize:
-                        16,
-                    color:
-                        Color(
-                      0xFF0F172A,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -1445,38 +1353,27 @@ final canGoNext =
     return Container(
       margin:
           const EdgeInsets.only(
-        bottom: 20,
+        bottom: 10,
       ),
       decoration:
           BoxDecoration(
-        color:
-            Colors.white,
+        color: Colors.white,
         borderRadius:
-            BorderRadius.circular(
-          16,
-        ),
-        border:
-            Border.all(
-          color:
-              const Color(
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(
             0xFFE2E8F0,
           ),
         ),
       ),
       clipBehavior:
           Clip.antiAlias,
-      child:
-          Column(
+      child: Column(
         children: [
-          // Hour always visible
-          buildHourHeader(
-            group,
-          ),
+          buildHourHeader(group),
 
-          // Table only visible when hour is open
           if (expanded) ...[
             buildTableHeader(),
-
             ...group.slots.map(
               buildSlotRow,
             ),
@@ -1502,138 +1399,130 @@ final canGoNext =
           const Color(
         0xFFF8FAFC,
       ),
-      appBar:
-          AppBar(
+      appBar: AppBar(
+        automaticallyImplyLeading:
+            false,
         backgroundColor:
-            Colors.white,
-        foregroundColor:
             const Color(
-          0xFF0F172A,
+          0xFFF97316,
         ),
-        elevation:
-            0,
-        title:
-            const Text(
-          'Activity',
-          style:
-              TextStyle(
+        foregroundColor:
+            Colors.white,
+        centerTitle: true,
+        elevation: 0,
+        toolbarHeight: 58,
+        title: const Text(
+          'Keyboard Activity',
+          style: TextStyle(
+            color: Colors.white,
             fontWeight:
-                FontWeight.bold,
+                FontWeight.w600,
+            fontSize: 16,
           ),
         ),
       ),
-      body:
-          Padding(
+      body: Padding(
         padding:
-            const EdgeInsets.all(
-          30,
-        ),
-        child:
-            Column(
+            const EdgeInsets.all(16),
+        child: Column(
           children: [
-            // ================================================
-            // DATE + ADMIN EMPLOYEE FILTER
-            // ================================================
+            // DATE BAR
+            buildDateSelector(),
 
+            const SizedBox(height: 12),
+
+            // SUMMARY + FILTERS
             Row(
               children: [
                 Expanded(
-                  child:
-                      buildDateSelector(),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      buildSummaryBadge(
+                        icon:
+                            Icons.keyboard_rounded,
+                        label: 'Keyboard',
+                        value:
+                            dailyKeyboardTotal,
+                      ),
+                      buildSummaryBadge(
+                        icon:
+                            Icons.mouse_rounded,
+                        label: 'Mouse',
+                        value:
+                            dailyMouseTotal,
+                      ),
+                      buildSummaryBadge(
+                        icon:
+                            Icons.touch_app_rounded,
+                        label: 'Total',
+                        value:
+                            dailyActivityTotal,
+                      ),
+                      buildSummaryBadge(
+                        icon:
+                            Icons
+                                .view_timeline_rounded,
+                        label: 'Intervals',
+                        value:
+                            dailyIntervalCount,
+                      ),
+                    ],
+                  ),
                 ),
 
-                // ADMIN FILTER IS STILL HERE
                 if (isAdmin) ...[
                   const SizedBox(
-                    width:
-                        20,
+                    width: 14,
                   ),
-                  Expanded(
-                    child:
-                        buildEmployeeFilter(),
-                  ),
+                  buildEmployeeFilter(),
                 ],
+
+                const SizedBox(width: 14),
+
+                buildQuickDayFilter(),
               ],
             ),
 
-            const SizedBox(
-              height:
-                  22,
-            ),
+            const SizedBox(height: 18),
 
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                buildSummaryBadge(
-                  icon: Icons.keyboard_rounded,
-                  label: 'Keyboard',
-                  value: dailyKeyboardTotal,
-                ),
-                buildSummaryBadge(
-                  icon: Icons.mouse_rounded,
-                  label: 'Mouse',
-                  value: dailyMouseTotal,
-                ),
-                buildSummaryBadge(
-                  icon: Icons.touch_app_rounded,
-                  label: 'Total Activity',
-                  value: dailyActivityTotal,
-                ),
-                buildSummaryBadge(
-                  icon: Icons.view_timeline_rounded,
-                  label: 'Intervals',
-                  value: dailyIntervalCount,
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 22),
-
-            // ================================================
             // HOURS
-            // ================================================
-
             Expanded(
-              child:
-                  loading
-                      ? const Center(
-                          child:
-                              CircularProgressIndicator(),
-                        )
-                      : groups.isEmpty
-                          ? Center(
-                              child:
-                                  Text(
-                                selectedDayIndex ==
-                                        0
-                                    ? 'No activity today'
-                                    : 'No activity on $selectedDayLabel',
-                                style:
-                                    const TextStyle(
-                                  fontSize:
-                                      16,
-                                  color:
-                                      Color(
-                                    0xFF64748B,
-                                  ),
-                                ),
+              child: loading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(),
+                    )
+                  : groups.isEmpty
+                      ? Center(
+                          child: Text(
+                            selectedDayIndex ==
+                                    0
+                                ? 'No activity today'
+                                : 'No activity on $selectedDayLabel',
+                            style:
+                                const TextStyle(
+                              fontSize: 16,
+                              color: Color(
+                                0xFF64748B,
                               ),
-                            )
-                          : ListView.builder(
-                              itemCount:
-                                  groups.length,
-                              itemBuilder:
-                                  (
-                                context,
-                                index,
-                              ) {
-                                return buildHourCard(
-                                  groups[
-                                      index],
-                                );
-                              },
                             ),
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount:
+                              groups.length,
+                          itemBuilder:
+                              (
+                            context,
+                            index,
+                          ) {
+                            return buildHourCard(
+                              groups[index],
+                            );
+                          },
+                        ),
             ),
           ],
         ),
@@ -1643,18 +1532,15 @@ final canGoNext =
 }
 
 // ============================================================
-// 5-MINUTE SLOT
+// 15-MINUTE SLOT
 // ============================================================
 
 class _ActivitySlot {
   final DateTime slotStart;
-
   final String employeeName;
-
   final String employeeId;
 
   int keyboard;
-
   int mouse;
 
   _ActivitySlot({
@@ -1672,11 +1558,8 @@ class _ActivitySlot {
 
 class _HourActivityGroup {
   final DateTime hourStart;
-
   final List<_ActivitySlot> slots;
-
   final int keyboardTotal;
-
   final int mouseTotal;
 
   const _HourActivityGroup({

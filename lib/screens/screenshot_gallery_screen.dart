@@ -567,8 +567,9 @@ return '${DateFormat('h a').format(start)} - '
   }
 
   Widget screenshotCard(
-    Map<String, dynamic> screenshot,
-  ) {
+    Map<String, dynamic> screenshot, {
+    required double cardWidth,
+  }) {
     final capturedTime = formatTime(
       screenshot['captured_at'],
     );
@@ -577,6 +578,9 @@ return '${DateFormat('h a').format(start)} - '
         screenshot['employee_name']?.toString() ??
             'Employee';
 
+    // Keep a 16:9 screenshot shape.
+    final imageHeight = cardWidth * 9 / 16;
+
     return FutureBuilder<Uint8List?>(
       future: _imageFutureFor(screenshot),
       builder: (context, snapshot) {
@@ -584,6 +588,7 @@ return '${DateFormat('h a').format(start)} - '
             ConnectionState.waiting) {
           return _loadingScreenshotCard(
             capturedTime: capturedTime,
+            cardWidth: cardWidth,
           );
         }
 
@@ -595,7 +600,7 @@ return '${DateFormat('h a').format(start)} - '
         }
 
         return SizedBox(
-          width: 300,
+          width: cardWidth,
           child: Column(
             crossAxisAlignment:
                 CrossAxisAlignment.start,
@@ -610,27 +615,27 @@ return '${DateFormat('h a').format(start)} - '
                     );
                   },
                   borderRadius:
-                      BorderRadius.circular(8),
+                      BorderRadius.circular(7),
                   child: Stack(
                     children: [
                       Container(
-                        width: 300,
-                        height: 170,
+                        width: cardWidth,
+                        height: imageHeight,
                         decoration: BoxDecoration(
                           color: Colors.grey.shade100,
                           borderRadius:
-                              BorderRadius.circular(8),
+                              BorderRadius.circular(7),
                           border: Border.all(
                             color: borderColor,
                           ),
                         ),
                         child: ClipRRect(
                           borderRadius:
-                              BorderRadius.circular(7),
+                              BorderRadius.circular(6),
                           child: Image.memory(
                             imageBytes,
-                            width: 300,
-                            height: 170,
+                            width: cardWidth,
+                            height: imageHeight,
                             fit: BoxFit.contain,
                             gaplessPlayback: true,
                           ),
@@ -651,7 +656,7 @@ return '${DateFormat('h a').format(start)} - '
                   ),
                 ),
               ),
-              const SizedBox(height: 9),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   Expanded(
@@ -664,18 +669,18 @@ return '${DateFormat('h a').format(start)} - '
                         color: orange,
                         fontWeight:
                             FontWeight.w600,
-                        fontSize: 13,
+                        fontSize: 11,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Text(
                     capturedTime,
                     style: const TextStyle(
                       color: darkText,
                       fontWeight:
                           FontWeight.w600,
-                      fontSize: 13,
+                      fontSize: 11,
                     ),
                   ),
                 ],
@@ -689,36 +694,39 @@ return '${DateFormat('h a').format(start)} - '
 
   Widget _loadingScreenshotCard({
     required String capturedTime,
+    required double cardWidth,
   }) {
+    final imageHeight = cardWidth * 9 / 16;
+
     return SizedBox(
-      width: 300,
+      width: cardWidth,
       child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.start,
         children: [
           Container(
-            width: 300,
-            height: 170,
+            width: cardWidth,
+            height: imageHeight,
             decoration: BoxDecoration(
               color: const Color(0xFFF1F5F9),
               borderRadius:
-                  BorderRadius.circular(8),
+                  BorderRadius.circular(7),
               border: Border.all(
                 color: borderColor,
               ),
             ),
             child: const Center(
               child: SizedBox(
-                width: 25,
-                height: 25,
+                width: 22,
+                height: 22,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
+                  strokeWidth: 2,
                   color: orange,
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 9),
+          const SizedBox(height: 6),
           Align(
             alignment: Alignment.centerRight,
             child: Text(
@@ -726,7 +734,7 @@ return '${DateFormat('h a').format(start)} - '
               style: const TextStyle(
                 color: secondaryText,
                 fontWeight: FontWeight.w600,
-                fontSize: 13,
+                fontSize: 11,
               ),
             ),
           ),
@@ -777,8 +785,8 @@ return '${DateFormat('h a').format(start)} - '
           });
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 30),
-      padding: const EdgeInsets.all(26),
+      margin: const EdgeInsets.only(bottom: 22),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius:
@@ -794,7 +802,7 @@ return '${DateFormat('h a').format(start)} - '
           Row(
             children: [
               CircleAvatar(
-                radius: 25,
+                radius: 22,
                 backgroundColor:
                     const Color(0xFFFFEDD5),
                 child: Text(
@@ -810,23 +818,23 @@ return '${DateFormat('h a').format(start)} - '
                 child: Text(
                   employeeName,
                   style: const TextStyle(
-                    fontSize: 23,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: darkText,
                   ),
                 ),
               ),
               Text(
-                '${screenshots.length} Screenshots',
+                '${employeeScreenshots.length} Screenshots',
                 style: const TextStyle(
-                  fontSize: 16,
+                  fontSize: 14,
                   color: secondaryText,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 22),
           ...sortedGroupEntries.map(
             (entry) {
               return _hourTimelineSection(
@@ -846,68 +854,98 @@ return '${DateFormat('h a').format(start)} - '
     required String label,
     required List<Map<String, dynamic>> items,
   }) {
+    const double horizontalGap = 18;
+    const double verticalGap = 18;
+
     return Padding(
       padding: const EdgeInsets.only(
-        bottom: 34,
+        bottom: 26,
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 145,
-            child: Padding(
-              padding:
-                  const EdgeInsets.only(top: 1),
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: darkText,
-                ),
-              ),
-            ),
-          ),
-          Column(
+          // Hour heading
+          Row(
             children: [
               Container(
-                width: 13,
-                height: 13,
+                width: 10,
+                height: 10,
                 decoration: const BoxDecoration(
                   color: orange,
                   shape: BoxShape.circle,
                 ),
               ),
-              Container(
-                width: 2,
-                height: 225,
-                color: borderColor,
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: darkText,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '(${items.length} screenshots)',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: secondaryText,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Divider(
+                  height: 1,
+                  color: borderColor,
+                ),
               ),
             ],
           ),
-          const SizedBox(width: 22),
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 1,
-                  margin:
-                      const EdgeInsets.only(top: 6),
-                  color: borderColor,
-                ),
-                const SizedBox(height: 25),
-                Wrap(
-                  spacing: 28,
-                  runSpacing: 28,
-                  children: items
-                      .map(screenshotCard)
-                      .toList(),
-                ),
-              ],
-            ),
+
+          const SizedBox(height: 16),
+
+          // Responsive gallery.
+          // Maximum = 6 screenshots on one row.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final availableWidth =
+                  constraints.maxWidth;
+
+              // Minimum size keeps thumbnails readable.
+              // On a normal desktop width this resolves to 6 columns.
+              const double minimumCardWidth = 165;
+
+              int columns =
+                  ((availableWidth + horizontalGap) /
+                          (minimumCardWidth +
+                              horizontalGap))
+                      .floor();
+
+              if (columns < 1) columns = 1;
+              if (columns > 6) columns = 6;
+
+              final cardWidth =
+                  (availableWidth -
+                          (horizontalGap *
+                              (columns - 1))) /
+                      columns;
+
+              return Wrap(
+                spacing: horizontalGap,
+                runSpacing: verticalGap,
+                children: items
+                    .map(
+                      (screenshot) =>
+                          screenshotCard(
+                        screenshot,
+                        cardWidth: cardWidth,
+                      ),
+                    )
+                    .toList(),
+              );
+            },
           ),
         ],
       ),
@@ -992,44 +1030,50 @@ return '${DateFormat('h a').format(start)} - '
               ),
             ),
           ),
-          const SizedBox(width: 20),
+          if (isAdmin) ...[
+  const SizedBox(width: 20),
 
-SizedBox(
-  width: 220,
-  child: DropdownButtonFormField<String>(
-    value: selectedEmployee,
-    decoration: InputDecoration(
-      labelText: 'Employee',
-      filled: true,
-      fillColor: background,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: borderColor),
-      ),
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 12,
-      ),
-    ),
-    items: employees
-        .map(
-          (employee) => DropdownMenuItem<String>(
-            value: employee,
-            child: Text(employee),
+  SizedBox(
+    width: 220,
+    child: DropdownButtonFormField<String>(
+      value: selectedEmployee,
+      decoration: InputDecoration(
+        labelText: 'Employee',
+        filled: true,
+        fillColor: background,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(
+            color: borderColor,
           ),
-        )
-        .toList(),
-    onChanged: (value) {
-      setState(() {
-        selectedEmployee = value!;
-      });
-    },
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(
+            color: borderColor,
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+      ),
+      items: employees
+          .map(
+            (employee) => DropdownMenuItem<String>(
+              value: employee,
+              child: Text(employee),
+            ),
+          )
+          .toList(),
+      onChanged: (value) {
+        setState(() {
+          selectedEmployee = value!;
+        });
+      },
+    ),
   ),
-),
+],
           IconButton(
             tooltip: 'Next day',
             onPressed:
@@ -1095,13 +1139,13 @@ if (selectedEmployee == 'All Employees') {
         child: SingleChildScrollView(
           physics:
               const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(28),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment:
                 CrossAxisAlignment.start,
             children: [
               dateNavigationBar(),
-              const SizedBox(height: 26),
+              const SizedBox(height: 20),
               if (loading)
                 const SizedBox(
                   height: 400,

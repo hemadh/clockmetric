@@ -49,10 +49,6 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     }
 
     await loadTimesheet();
-
-    if (!widget.isManager) {
-      await loadWeeklyTeamTime();
-    }
   }
 
   DateTime getWeekStart() {
@@ -518,10 +514,6 @@ Future<void> loadWeeklyTeamTime() async {
 
   Future<void> refreshTimesheetScreen() async {
   await loadTimesheet();
-
-  if (!widget.isManager) {
-    await loadWeeklyTeamTime();
-  }
 }
 
   void goToPreviousWeek() {
@@ -826,10 +818,6 @@ Future<void> loadWeeklyTeamTime() async {
                               projectRows,
                               dailyTotals,
                             ),
-                      if (!widget.isManager) ...[
-                        const SizedBox(height: 24),
-                        buildWeeklyTeamTimeSection(),
-                      ],
                     ],
                   ),
                 ),

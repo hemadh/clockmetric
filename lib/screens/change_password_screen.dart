@@ -150,11 +150,19 @@ class _ChangePasswordScreenState
 
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Change Password'),
-        backgroundColor: const Color(0xFFF97316),
-        foregroundColor: Colors.white,
-      ),
+  automaticallyImplyLeading: false,
+  backgroundColor: const Color(0xFFF97316),
+  foregroundColor: Colors.white,
+  centerTitle: true,
+  elevation: 0,
+  title: const Text(
+    'Change Password',
+    style: TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),

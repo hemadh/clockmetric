@@ -12,6 +12,7 @@ import 'screens/reset_password_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/session_timeout_service.dart';
 import 'services/update_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final supabase = Supabase.instance.client;
 Uri? startupDeepLink;
@@ -22,7 +23,12 @@ String currentUserId = '';
 String currentUserName = '';
 String currentUserRole = '';
 String currentWorkspaceId = '';
+bool workspaceTrialExpired = false;
+bool workspaceSubscriptionBlocked = false;
 String currentWorkspaceName = '';
+
+final ValueNotifier<String> currentWorkspaceNameNotifier =
+    ValueNotifier<String>('');
 
 ValueNotifier<bool> isDarkMode = ValueNotifier(false);
 
@@ -222,6 +228,12 @@ class _AuthGateState extends State<AuthGate> {
   StreamSubscription<Uri>? appLinksSubscription;
   final UpdateService _updateService = UpdateService();
   bool _checkingForUpdate = false;
+
+  static const String _lastOpenedKey =
+    'clockmetric_last_opened_at';
+
+static const Duration _maxNotOpenedDuration =
+    Duration(days: 30);
 
   @override
   void initState() {
@@ -475,14 +487,54 @@ Future<void> _handleSessionTimeout() async {
   SessionTimeoutService.instance.stop();
   return;
 }
+Future<bool> _checkThirtyDayLoginRule() async {
+  // This rule is for the installed desktop app.
+  if (kIsWeb) {
+    return true;
+  }
+
+  final prefs = await SharedPreferences.getInstance();
+  final now = DateTime.now();
+
+  final lastOpenedText = prefs.getString(_lastOpenedKey);
+  final currentSessionUser = supabase.auth.currentUser;
+
+  if (lastOpenedText != null) {
+    final lastOpened = DateTime.tryParse(lastOpenedText);
+
+    if (lastOpened != null &&
+        currentSessionUser != null &&
+        now.difference(lastOpened) >= _maxNotOpenedDuration) {
+      // ClockMetric has not been opened for 30 days.
+      await prefs.setString(
+        _lastOpenedKey,
+        now.toIso8601String(),
+      );
+
+      await supabase.auth.signOut();
+
+      return false;
+    }
+  }
+
+  // Opening ClockMetric resets the 30-day period.
+  await prefs.setString(
+    _lastOpenedKey,
+    now.toIso8601String(),
+  );
+
+  return true;
+}
 
   void _clearCurrentUser() {
-    currentUserId = '';
-    currentUserName = '';
-    currentUserRole = '';
-    currentWorkspaceId = '';
-    currentWorkspaceName = '';
-  }
+  currentUserId = '';
+  currentUserName = '';
+  currentUserRole = '';
+  currentWorkspaceId = '';
+  currentWorkspaceName = '';
+
+  currentWorkspaceNameNotifier.value = '';
+}
 
   Future<void> checkSession() async {
     if (passwordRecoveryActive) {
@@ -511,6 +563,22 @@ Future<void> _handleSessionTimeout() async {
       });
       return;
     }
+    final sessionStillValid =
+    await _checkThirtyDayLoginRule();
+
+if (!sessionStillValid) {
+  SessionTimeoutService.instance.stop();
+  _clearCurrentUser();
+
+  if (!mounted) return;
+
+  setState(() {
+    loggedIn = false;
+    loading = false;
+  });
+
+  return;
+}
 
     if (mounted) {
       setState(() {
@@ -703,7 +771,9 @@ if (kIsWeb && resolvedRole != 'admin') {
 
       final workspace = await supabase
           .from('workspaces')
-          .select('workspace_name')
+          .select(
+  'workspace_name, subscription_status, trial_ends_at, current_period_end',
+)
           .eq('id', currentWorkspaceId)
           .maybeSingle();
 
@@ -713,8 +783,46 @@ if (kIsWeb && resolvedRole != 'admin') {
         );
       }
 
+      final workspaceStatus =
+    workspace['subscription_status']
+        ?.toString()
+        .trim()
+        .toLowerCase() ??
+    '';
+
+final trialEndText =
+    workspace['trial_ends_at']?.toString();
+
+final trialEnd =
+    trialEndText == null
+        ? null
+        : DateTime.tryParse(trialEndText);
+
+workspaceTrialExpired =
+    workspaceStatus == 'trialing' &&
+    trialEnd != null &&
+    DateTime.now().isAfter(trialEnd);
+
+
+
+    final currentPeriodEndText =
+    workspace['current_period_end']?.toString();
+
+final currentPeriodEnd =
+    currentPeriodEndText == null
+        ? null
+        : DateTime.tryParse(currentPeriodEndText);
+
+workspaceSubscriptionBlocked =
+    workspaceTrialExpired ||
+    (workspaceStatus == 'cancelled' &&
+        currentPeriodEnd != null &&
+        DateTime.now().isAfter(currentPeriodEnd));
+
       currentWorkspaceName =
     workspace['workspace_name']?.toString().trim() ?? '';
+
+currentWorkspaceNameNotifier.value = currentWorkspaceName;
 
 if (!mounted) return;
 
@@ -877,10 +985,69 @@ Future<void> _showUpdateDownloadDialog(
         ),
       );
     } else if (loggedIn) {
-      screen = const DashboardV2Screen();
-    } else {
-      screen = const LoginScreen();
-    }
+  if (workspaceSubscriptionBlocked && currentUserRole != 'admin') {
+  screen = Scaffold(
+    backgroundColor: const Color(0xFFF8FAFC),
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.lock_clock_rounded,
+            size: 54,
+            color: Color(0xFFF97316),
+          ),
+
+          const SizedBox(height: 18),
+
+          const Text(
+            'Your workspace trial has ended.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          const Text(
+            'Please contact your administrator.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          SizedBox(
+            width: 160,
+            height: 42,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                await supabase.auth.signOut();
+              },
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('Logout'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF97316),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+} else {
+    screen = const DashboardV2Screen();
+  }
+} else {
+  screen = const LoginScreen();
+}
 
     return Listener(
       behavior: HitTestBehavior.translucent,

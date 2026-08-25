@@ -27,12 +27,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final TextEditingController employeeSearchController =
       TextEditingController();
 
+  final TextEditingController workspaceKpiSearchController =
+      TextEditingController();
+
   bool loading = true;
   bool saving = false;
 
   String? errorMessage;
   String inviteRole = 'employee';
   String employeeSearch = '';
+  String workspaceKpiSearch = '';
+  String selectedWorkspaceKpi = 'projects';
 
   Map<String, dynamic>? workspace;
 
@@ -60,6 +65,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       });
     });
 
+    workspaceKpiSearchController.addListener(() {
+      if (!mounted) return;
+
+      setState(() {
+        workspaceKpiSearch =
+            workspaceKpiSearchController.text.trim().toLowerCase();
+      });
+    });
+
     loadWorkspaceData();
   }
 
@@ -70,6 +84,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     inviteNameController.dispose();
     inviteEmailController.dispose();
     employeeSearchController.dispose();
+    workspaceKpiSearchController.dispose();
 
     super.dispose();
   }
@@ -134,12 +149,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             .eq('workspace_id', currentWorkspaceId),
 
         supabase
-            .from('pending_employees')
-            .select(
-              'full_name, email, role, status, created_at',
-            )
-            .eq('workspace_id', currentWorkspaceId)
-            .order('created_at', ascending: false),
+    .from('pending_employees')
+    .select(
+      'full_name, email, role, status, created_at',
+    )
+    .eq('workspace_id', currentWorkspaceId)
+    .eq('status', 'pending')
+    .order('created_at', ascending: false),
 
         supabase
             .from('workspaces')
@@ -225,7 +241,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   List<Map<String, dynamic>> get filteredMembers {
-    if (employeeSearch.isEmpty) {
+    final query = selectedWorkspaceKpi == 'members'
+        ? workspaceKpiSearch
+        : employeeSearch;
+
+    if (query.isEmpty) {
       return members;
     }
 
@@ -248,9 +268,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               .toLowerCase() ??
           '';
 
-      return name.contains(employeeSearch) ||
-          email.contains(employeeSearch) ||
-          role.contains(employeeSearch);
+      return name.contains(query) ||
+          email.contains(query) ||
+          role.contains(query);
     }).toList();
   }
 
@@ -530,7 +550,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           .eq('id', currentWorkspaceId);
 
       currentWorkspaceName = newName;
-      renameController.clear();
+currentWorkspaceNameNotifier.value = newName;
+
+if (mounted) {
+  setState(() {
+    workspace?['workspace_name'] = newName;
+  });
+}
+
+renameController.clear();
 
       if (mounted) {
         Navigator.of(context).pop();
@@ -790,7 +818,7 @@ final response = await supabase.functions.invoke(
       return AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(13),
         ),
         title: const Text(
           'Cancel Invitation',
@@ -1285,7 +1313,7 @@ final response = await supabase.functions.invoke(
             child: ListView.separated(
               itemCount: allWorkspaces.length,
               separatorBuilder: (_, __) =>
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
               itemBuilder: (context, index) {
                 final item = allWorkspaces[index];
 
@@ -1984,34 +2012,41 @@ Widget build(BuildContext context) {
     backgroundColor: const Color(0xffF5F7FB),
 
     appBar: AppBar(
-      automaticallyImplyLeading: false,
-      elevation: 0,
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.white,
-
-      title: const Text(
-        "Workspace",
-        style: TextStyle(
-          color: Colors.black87,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-
-      actions: [
-
-        IconButton(
-          tooltip: "Refresh",
-          onPressed: loadWorkspaceData,
-          icon: const Icon(
-            Icons.refresh,
-            color: Colors.black87,
-          ),
-        ),
-
-        const SizedBox(width: 12),
-
-      ],
+  automaticallyImplyLeading: false,
+  elevation: 0,
+  centerTitle: true,
+  backgroundColor: AppColors.primary,
+  foregroundColor: Colors.white,
+  surfaceTintColor: AppColors.primary,
+  title: const Text(
+    'Workspace',
+    style: TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.bold,
     ),
+  ),
+  actions: [
+  IconButton(
+    tooltip: 'Invite Employee',
+    onPressed: showInviteEmployeeDialog,
+    icon: const Icon(Icons.person_add_outlined),
+  ),
+
+  IconButton(
+    tooltip: 'New Workspace',
+    onPressed: showCreateWorkspaceDialog,
+    icon: const Icon(Icons.add_business_outlined),
+  ),
+
+  IconButton(
+    tooltip: 'Refresh',
+    onPressed: loadWorkspaceData,
+    icon: const Icon(Icons.refresh),
+  ),
+
+  const SizedBox(width: 12),
+],
+),
 
     body: loading
         ? const Center(
@@ -2020,7 +2055,7 @@ Widget build(BuildContext context) {
         : RefreshIndicator(
             onRefresh: loadWorkspaceData,
             child: ListView(
-              padding: const EdgeInsets.all(28),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
               children: [
 
                 buildWorkspaceHero(
@@ -2029,67 +2064,22 @@ Widget build(BuildContext context) {
                   ownerEmail: ownerEmail,
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
 
                 buildStatistics(
                   activeProjects: activeProjects,
                 ),
 
-                const SizedBox(height: 35),
+                const SizedBox(height: 12),
 
-                buildMembersSection(),
+                buildKpiSearchBox(),
 
-                const SizedBox(height: 35),
-
-                buildProjectsSection(),
-
-                const SizedBox(height: 35),
-
-                buildPendingInvitesSection(),
+                buildSelectedWorkspaceSection(),
 
               ],
             ),
           ),
 
-    floatingActionButton: isAdmin
-        ? Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-
-              FloatingActionButton.extended(
-                heroTag: "invite",
-
-                backgroundColor: AppColors.primary,
-
-                onPressed: showInviteEmployeeDialog,
-
-                icon: const Icon(Icons.person_add),
-
-                label: const Text(
-                  "Invite Employee",
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              FloatingActionButton.extended(
-
-                heroTag: "workspace",
-
-                backgroundColor: Colors.green,
-
-                onPressed: showCreateWorkspaceDialog,
-
-                icon: const Icon(Icons.add_business),
-
-                label: const Text(
-                  "New Workspace",
-                ),
-              ),
-
-            ],
-          )
-        : null,
   );
 }
 Widget buildWorkspaceHero({
@@ -2098,15 +2088,15 @@ Widget buildWorkspaceHero({
   required String ownerEmail,
 }) {
   return Container(
-    padding: const EdgeInsets.all(30),
+    padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(16),
       boxShadow: const [
         BoxShadow(
           color: Color(0x11000000),
-          blurRadius: 18,
-          offset: Offset(0, 8),
+          blurRadius: 12,
+          offset: Offset(0, 4),
         ),
       ],
     ),
@@ -2118,20 +2108,20 @@ Widget buildWorkspaceHero({
           children: [
 
             Container(
-              width: 74,
-              height: 74,
+              width: 54,
+              height: 54,
               decoration: BoxDecoration(
                 color: AppColors.primary.withOpacity(.08),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(13),
               ),
               child: const Icon(
                 Icons.business,
                 color: AppColors.primary,
-                size: 40,
+                size: 28,
               ),
             ),
 
-            const SizedBox(width: 20),
+            const SizedBox(width: 14),
 
             Expanded(
               child: Column(
@@ -2142,7 +2132,7 @@ Widget buildWorkspaceHero({
                   Text(
                     workspaceName,
                     style: const TextStyle(
-                      fontSize: 28,
+                      fontSize: 21,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -2156,17 +2146,17 @@ Widget buildWorkspaceHero({
                     ),
                   ),
 
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 6),
 
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 7,
+                      horizontal: 10,
+                      vertical: 4,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.green.shade50,
                       borderRadius:
-                          BorderRadius.circular(30),
+                          BorderRadius.circular(20),
                     ),
                     child: const Text(
                       "Workspace Active",
@@ -2184,7 +2174,7 @@ Widget buildWorkspaceHero({
           ],
         ),
 
-        const SizedBox(height: 30),
+        const SizedBox(height: 16),
 
         Row(
           children: [
@@ -2197,7 +2187,7 @@ Widget buildWorkspaceHero({
               ),
             ),
 
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
 
             Expanded(
               child: OutlinedButton.icon(
@@ -2207,7 +2197,7 @@ Widget buildWorkspaceHero({
               ),
             ),
 
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
 
             Expanded(
               child: OutlinedButton.icon(
@@ -2220,15 +2210,15 @@ Widget buildWorkspaceHero({
           ],
         ),
 
-        const SizedBox(height: 25),
+        const SizedBox(height: 14),
 
         Divider(),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
 
         Wrap(
-          spacing: 40,
-          runSpacing: 15,
+          spacing: 26,
+          runSpacing: 10,
           children: [
 
             Row(
@@ -2237,11 +2227,11 @@ Widget buildWorkspaceHero({
 
                 const Icon(
                   Icons.person_outline,
-                  size: 18,
+                  size: 15,
                   color: Colors.grey,
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
 
                 Text(
                   ownerName,
@@ -2259,11 +2249,11 @@ Widget buildWorkspaceHero({
 
                 const Icon(
                   Icons.people_outline,
-                  size: 18,
+                  size: 15,
                   color: Colors.grey,
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
 
                 Text(
                   "${members.length} Members",
@@ -2278,11 +2268,11 @@ Widget buildWorkspaceHero({
 
                 const Icon(
                   Icons.folder_outlined,
-                  size: 18,
+                  size: 15,
                   color: Colors.grey,
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
 
                 Text(
                   "${projects.length} Projects",
@@ -2297,11 +2287,11 @@ Widget buildWorkspaceHero({
 
                 const Icon(
                   Icons.mail_outline,
-                  size: 18,
+                  size: 15,
                   color: Colors.grey,
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
 
                 Text(
                   "${pendingEmployees.length} Pending Invites",
@@ -2321,44 +2311,51 @@ Widget buildWorkspaceHero({
  Widget buildStatistics({
   required int activeProjects,
 }) {
-  return GridView.count(
-    crossAxisCount: 4,
-    shrinkWrap: true,
-    physics: const NeverScrollableScrollPhysics(),
-    mainAxisSpacing: 18,
-    crossAxisSpacing: 18,
-    childAspectRatio: 1.45,
-    children: [
-
-      dashboardCard(
-        title: "Members",
-        value: members.length.toString(),
-        icon: Icons.people,
-        color: Colors.blue,
-      ),
-
-      dashboardCard(
-        title: "Projects",
-        value: activeProjects.toString(),
-        icon: Icons.folder_copy_outlined,
-        color: Colors.orange,
-      ),
-
-      dashboardCard(
-        title: "Running",
-        value: runningEntries.length.toString(),
-        icon: Icons.play_circle_fill,
-        color: Colors.green,
-      ),
-
-      dashboardCard(
-        title: "Pending",
-        value: pendingEmployees.length.toString(),
-        icon: Icons.mail_outline,
-        color: Colors.red,
-      ),
-
-    ],
+  return SizedBox(
+    height: 76,
+    child: Row(
+      children: [
+        Expanded(
+          child: dashboardCard(
+            title: "Members",
+            value: members.length.toString(),
+            icon: Icons.people,
+            color: Colors.blue,
+            section: 'members',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: dashboardCard(
+            title: "Projects",
+            value: activeProjects.toString(),
+            icon: Icons.folder_copy_outlined,
+            color: Colors.orange,
+            section: 'projects',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: dashboardCard(
+            title: "Running",
+            value: runningEntries.length.toString(),
+            icon: Icons.play_circle_fill,
+            color: Colors.green,
+            section: 'running',
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: dashboardCard(
+            title: "Pending",
+            value: pendingEmployees.length.toString(),
+            icon: Icons.mail_outline,
+            color: Colors.red,
+            section: 'pending',
+          ),
+        ),
+      ],
+    ),
   );
 }
 
@@ -2367,55 +2364,315 @@ Widget dashboardCard({
   required String value,
   required IconData icon,
   required Color color,
+  required String section,
 }) {
+  final selected = selectedWorkspaceKpi == section;
+
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(13),
+      onTap: () {
+        setState(() {
+          selectedWorkspaceKpi = section;
+          workspaceKpiSearch = '';
+          workspaceKpiSearchController.clear();
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 13,
+          vertical: 9,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.055)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(
+            color: selected
+                ? color.withValues(alpha: 0.55)
+                : AppColors.border,
+            width: selected ? 1.4 : 1,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x09000000),
+              blurRadius: 7,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.11),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: color,
+                size: 19,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      height: 1.05,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected
+                          ? color
+                          : AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(
+                Icons.check_circle,
+                size: 16,
+                color: color,
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget buildKpiSearchBox() {
+  String hint;
+
+  switch (selectedWorkspaceKpi) {
+    case 'members':
+      hint = 'Search members by name, email or role...';
+      break;
+    case 'projects':
+      hint = 'Search projects by name...';
+      break;
+    case 'running':
+      hint = 'Search running employees...';
+      break;
+    case 'pending':
+      hint = 'Search pending invitations by name, email or role...';
+      break;
+    default:
+      hint = 'Search...';
+  }
+
   return Container(
-    padding: const EdgeInsets.all(22),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x12000000),
-          blurRadius: 18,
-          offset: Offset(0, 8),
+    height: 42,
+    margin: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: workspaceKpiSearchController,
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.normal,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(
+          fontSize: 14,
+          color: AppColors.textMuted,
+          fontWeight: FontWeight.normal,
         ),
-      ],
+        prefixIcon: const Icon(
+          Icons.search,
+          size: 19,
+          color: AppColors.textSecondary,
+        ),
+        suffixIcon: workspaceKpiSearch.isNotEmpty
+            ? IconButton(
+                tooltip: 'Clear',
+                onPressed: workspaceKpiSearchController.clear,
+                icon: const Icon(
+                  Icons.close,
+                  size: 17,
+                  color: AppColors.textSecondary,
+                ),
+              )
+            : null,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 8,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(
+            color: AppColors.border,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(
+            color: AppColors.border,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(
+            color: AppColors.primary,
+            width: 1.2,
+          ),
+        ),
+      ),
     ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+  );
+}
 
-        CircleAvatar(
-          radius: 24,
-          backgroundColor: color.withOpacity(.12),
-          child: Icon(
-            icon,
-            color: color,
-          ),
+Widget buildSelectedWorkspaceSection() {
+  switch (selectedWorkspaceKpi) {
+    case 'members':
+      return buildMembersSection();
+    case 'running':
+      return buildRunningSection();
+    case 'pending':
+      return buildPendingInvitesSection();
+    case 'projects':
+    default:
+      return buildProjectsSection();
+  }
+}
+
+Widget buildRunningSection() {
+  final runningNames = runningEntries
+      .map(
+        (entry) =>
+            entry['employee_name']?.toString().trim().toLowerCase(),
+      )
+      .whereType<String>()
+      .where((name) => name.isNotEmpty)
+      .toSet();
+
+  final runningMembers = members.where((member) {
+    final name =
+        member['full_name']?.toString().trim().toLowerCase() ?? '';
+
+    final email =
+        member['email']?.toString().trim().toLowerCase() ?? '';
+
+    final role =
+        member['role']?.toString().trim().toLowerCase() ?? '';
+
+    final isRunning = runningNames.contains(name);
+
+    if (!isRunning) {
+      return false;
+    }
+
+    if (workspaceKpiSearch.isEmpty) {
+      return true;
+    }
+
+    return name.contains(workspaceKpiSearch) ||
+        email.contains(workspaceKpiSearch) ||
+        role.contains(workspaceKpiSearch);
+  }).toList();
+
+  final filteredRunningEntries = runningEntries.where((entry) {
+    if (workspaceKpiSearch.isEmpty) {
+      return true;
+    }
+
+    final name =
+        entry['employee_name']?.toString().trim().toLowerCase() ?? '';
+
+    return name.contains(workspaceKpiSearch);
+  }).toList();
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      sectionHeader(
+        title: 'Running Now',
+        subtitle: 'Employees currently tracking time in this workspace.',
+        count: runningEntries.length,
+      ),
+      const SizedBox(height: 12),
+      if (runningEntries.isEmpty)
+        emptySection(
+          icon: Icons.play_circle_outline,
+          title: 'No active timers',
+          subtitle: 'No employee is tracking time right now.',
+        )
+      else if (runningMembers.isNotEmpty)
+        ...runningMembers.map(buildEmployeeCard)
+      else if (filteredRunningEntries.isNotEmpty)
+        ...filteredRunningEntries.map((entry) {
+          final name =
+              entry['employee_name']?.toString().trim() ?? 'Employee';
+
+          return Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.green.withOpacity(.12),
+                  foregroundColor: Colors.green,
+                  child: const Icon(Icons.play_arrow_rounded),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const Text(
+                  'TRACKING NOW',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          );
+        })
+      else
+        emptySection(
+          icon: Icons.search_off_outlined,
+          title: 'No running employees found',
+          subtitle: 'Try a different search.',
         ),
-
-        const Spacer(),
-
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          title,
-          style: const TextStyle(
-            color: Colors.grey,
-            fontSize: 15,
-          ),
-        ),
-
-      ],
-    ),
+    ],
   );
 }
 
@@ -2462,7 +2719,7 @@ Widget dashboardCard({
               size: 24,
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           Text(
             value,
             style: const TextStyle(
@@ -2500,213 +2757,28 @@ Widget buildMembersSection() {
           Icon(
             Icons.people,
             color: AppColors.primary,
+            size: 18,
           ),
-          SizedBox(width: 10),
+          SizedBox(width: 7),
           Text(
             "Team Members",
             style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
       ),
-
-      const SizedBox(height: 20),
-
+      const SizedBox(height: 9),
       if (filteredMembers.isEmpty)
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(40),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Center(
-            child: Text(
-              "No employees found.",
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 16,
-              ),
-            ),
-          ),
+        emptySection(
+          icon: Icons.search_off_outlined,
+          title: 'No matching members found',
+          subtitle: 'Try a different search.',
         )
       else
-        ...filteredMembers.map((member) {
-          final name =
-              member["full_name"]?.toString() ??
-                  "Employee";
-
-          final email =
-              member["email"]?.toString() ??
-                  "";
-
-          final role =
-              member["role"]?.toString() ??
-                  "employee";
-
-          final employeeId =
-              member["id"]?.toString() ?? "";
-
-          final weeklyMinutes =
-              employeeWeeklyMinutes(name);
-
-          final assignedProjects =
-              getEmployeeProjects(employeeId);
-
-          final isRunning = runningEntries.any(
-            (e) =>
-                e["employee_name"]
-                    ?.toString()
-                    .trim() ==
-                name.trim(),
-          );
-
-          return Container(
-            margin:
-                const EdgeInsets.only(bottom: 16),
-            padding:
-                const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-                  BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x10000000),
-                  blurRadius: 16,
-                  offset: Offset(0, 8),
-                )
-              ],
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor:
-                      AppColors.primary,
-                  child: Text(
-                    initials(name),
-                    style:
-                        const TextStyle(
-                      color: Colors.white,
-                      fontWeight:
-                          FontWeight.bold,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 18),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            name,
-                            style:
-                                const TextStyle(
-                              fontSize: 18,
-                              fontWeight:
-                                  FontWeight.bold,
-                            ),
-                          ),
-
-                          const SizedBox(width: 10),
-
-                          Container(
-                            padding:
-                                const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration:
-                                BoxDecoration(
-                              color: role ==
-                                      "admin"
-                                  ? Colors.orange
-                                      .shade100
-                                  : Colors.blue
-                                      .shade100,
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      30),
-                            ),
-                            child: Text(
-                              role
-                                  .toUpperCase(),
-                              style:
-                                  const TextStyle(
-                                fontSize: 11,
-                                fontWeight:
-                                    FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        email,
-                        style:
-                            const TextStyle(
-                          color: Colors.grey,
-                        ),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      Wrap(
-                        spacing: 24,
-                        runSpacing: 8,
-                        children: [
-                          Text(
-                            "Projects : ${assignedProjects.length}",
-                          ),
-
-                          Text(
-                            "Week : ${formatDuration(weeklyMinutes)}",
-                          ),
-
-                          Text(
-                            isRunning
-                                ? "🟢 Running"
-                                : "⚪ Offline",
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                FilledButton.icon(
-                  style:
-                      FilledButton.styleFrom(
-                    backgroundColor:
-                        AppColors.primary,
-                    foregroundColor:
-                        Colors.white,
-                  ),
-                  onPressed: () {
-                    showManageEmployeeProjectsDialog(
-                      member,
-                    );
-                  },
-                  icon:
-                      const Icon(Icons.settings),
-                  label:
-                      const Text("Manage"),
-                ),
-              ],
-            ),
-          );
-        }),
+        ...filteredMembers.map(buildEmployeeCard),
     ],
   );
 }
@@ -2718,7 +2790,7 @@ Widget buildMembersSection() {
         employee['id']?.toString() ?? '';
 
     final name =
-        employee['full_name']?.toString().trim() ?? '';
+        employee['full_name']?.toString().trim() ?? 'Employee';
 
     final email =
         employee['email']?.toString().trim() ?? '';
@@ -2726,293 +2798,221 @@ Widget buildMembersSection() {
     final role =
         employee['role']?.toString().trim() ?? 'employee';
 
-    final isEmployeeAdmin =
-        role.toLowerCase() == 'admin';
-
     final employeeProjects =
         getEmployeeProjects(employeeId);
 
     final weeklyMinutes =
         employeeWeeklyMinutes(name);
 
-    final requiredHours = int.tryParse(
-          employee['required_weekly_hours']?.toString() ?? '',
-        ) ??
-        45;
-
-    final weeklyTargetMinutes = requiredHours * 60;
-
-    final progress = weeklyTargetMinutes == 0
-        ? 0.0
-        : (weeklyMinutes / weeklyTargetMinutes)
-            .clamp(0.0, 1.0);
-
     final running = runningEntries.any(
       (entry) =>
           entry['employee_name']?.toString().trim() ==
-          name,
+          name.trim(),
     );
+
+    final isEmployeeAdmin =
+        role.toLowerCase() == 'admin';
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 18),
-      padding: const EdgeInsets.all(25),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 9,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x09000000),
-            blurRadius: 18,
-            offset: Offset(0, 7),
+            color: Color(0x07000000),
+            blurRadius: 6,
+            offset: Offset(0, 2),
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 31,
-                backgroundColor: isEmployeeAdmin
-                    ? AppColors.primary
-                    : AppColors.primarySurface,
-                foregroundColor: isEmployeeAdmin
-                    ? Colors.white
-                    : AppColors.primary,
-                child: Text(
-                  initials(name.isEmpty ? email : name),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            child: Text(
+              initials(name),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(width: 17),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 3,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 8,
-                      crossAxisAlignment:
-                          WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          name.isEmpty ? 'Employee' : name,
-                          style: const TextStyle(
-                            color: AppColors.textPrimary,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        roleBadge(
-                          isEmployeeAdmin
-                              ? 'ADMIN'
-                              : 'EMPLOYEE',
-                          isEmployeeAdmin,
-                        ),
-                        if (running)
-                          Container(
-                            padding:
-                                const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.success.withValues(
-                                alpha: 0.10,
-                              ),
-                              borderRadius:
-                                  BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'TRACKING NOW',
-                              style: TextStyle(
-                                color: AppColors.success,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 7),
                     Text(
-                      email,
+                      name,
                       style: const TextStyle(
-                        color: AppColors.textSecondary,
+                        color: AppColors.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.1,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isEmployeeAdmin
+                            ? Colors.orange.shade100
+                            : Colors.blue.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        role.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              if (isAdmin)
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: const BorderSide(
-                      color: AppColors.primary,
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 15,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () {
-                    showManageEmployeeProjectsDialog(employee);
-                  },
-                  icon: const Icon(
-                    Icons.folder_shared_outlined,
-                  ),
-                  label: const Text(
-                    'Manage Projects',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+                const SizedBox(height: 4),
+                Text(
+                  email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.normal,
+                    height: 1.1,
                   ),
                 ),
-            ],
+                const SizedBox(height: 5),
+                Wrap(
+                  spacing: 13,
+                  runSpacing: 3,
+                  children: [
+                    Text(
+                      'Projects: ${employeeProjects.length}',
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                    Text(
+                      'Week: ${formatDuration(weeklyMinutes)}',
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: running
+                                ? AppColors.success
+                                : Colors.transparent,
+                            shape: BoxShape.circle,
+                            border: running
+                                ? null
+                                : Border.all(
+                                    color: AppColors.textMuted,
+                                    width: 1,
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          running ? 'Running' : 'Offline',
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 22),
-          const Divider(
-            color: AppColors.border,
-            height: 1,
-          ),
-          const SizedBox(height: 20),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              return Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: [
-                  employeeInfoBox(
-                    width: constraints.maxWidth >= 800
-                        ? 205
-                        : constraints.maxWidth,
-                    icon: Icons.schedule_outlined,
-                    title: 'This Week',
-                    value: formatDuration(weeklyMinutes),
-                  ),
-                  employeeInfoBox(
-                    width: constraints.maxWidth >= 800
-                        ? 205
-                        : constraints.maxWidth,
-                    icon: Icons.flag_outlined,
-                    title: 'Weekly Target',
-                    value: '$requiredHours hr',
-                  ),
-                  employeeInfoBox(
-                    width: constraints.maxWidth >= 800
-                        ? 205
-                        : constraints.maxWidth,
-                    icon: Icons.folder_outlined,
-                    title: 'Assigned Projects',
-                    value: employeeProjects.length.toString(),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Text(
-                'Weekly progress',
+          if (isAdmin) ...[
+            const SizedBox(width: 10),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 32),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: () {
+                showManageEmployeeProjectsDialog(
+                  employee,
+                );
+              },
+              icon: const Icon(
+                Icons.settings,
+                size: 14,
+              ),
+              label: const Text(
+                'Manage',
                 style: TextStyle(
-                  color: AppColors.textSecondary,
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const Spacer(),
-              Text(
-                '${(progress * 100).round()}%',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 9),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: LinearProgressIndicator(
-              minHeight: 9,
-              value: progress,
-              backgroundColor: AppColors.border,
-              color: AppColors.primary,
             ),
-          ),
-          const SizedBox(height: 20),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: employeeProjects.isEmpty
-                ? const Text(
-                    'No projects assigned.',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                    ),
-                  )
-                : Wrap(
-                    spacing: 9,
-                    runSpacing: 9,
-                    children: employeeProjects.map(
-                      (project) {
-                        final projectName =
-                            project['project_name']
-                                    ?.toString() ??
-                                'Project';
-
-                        final isActive =
-                            project['is_active'] != false;
-
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isActive
-                                ? AppColors.primarySurface
-                                : AppColors.background,
-                            borderRadius:
-                                BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isActive
-                                  ? AppColors.primaryLight
-                                  : AppColors.border,
-                            ),
-                          ),
-                          child: Text(
-                            projectName,
-                            style: TextStyle(
-                              color: isActive
-                                  ? AppColors.primary
-                                  : AppColors.textMuted,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        );
-                      },
-                    ).toList(),
-                  ),
-          ),
+          ],
         ],
       ),
     );
   }
 
   Widget buildPendingInvitesSection() {
+    final filteredPendingEmployees =
+        pendingEmployees.where((employee) {
+      if (workspaceKpiSearch.isEmpty) {
+        return true;
+      }
+
+      final name =
+          employee['full_name']?.toString().trim().toLowerCase() ?? '';
+
+      final email =
+          employee['email']?.toString().trim().toLowerCase() ?? '';
+
+      final role =
+          employee['role']?.toString().trim().toLowerCase() ?? '';
+
+      return name.contains(workspaceKpiSearch) ||
+          email.contains(workspaceKpiSearch) ||
+          role.contains(workspaceKpiSearch);
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3022,44 +3022,55 @@ Widget buildMembersSection() {
               'Employees waiting to accept their workspace invitation.',
           count: pendingEmployees.length,
         ),
-        const SizedBox(height: 20),
-        ...pendingEmployees.map(
-          (employee) {
+        const SizedBox(height: 9),
+        if (pendingEmployees.isEmpty)
+          emptySection(
+            icon: Icons.mark_email_read_outlined,
+            title: 'No pending invitations',
+            subtitle: 'There are no pending workspace invitations.',
+          )
+        else if (filteredPendingEmployees.isEmpty)
+          emptySection(
+            icon: Icons.search_off_outlined,
+            title: 'No pending invitations found',
+            subtitle: 'Try a different search.',
+          )
+        else
+          ...filteredPendingEmployees.map((employee) {
             final name =
                 employee['full_name']?.toString() ?? 'Employee';
-
             final email =
                 employee['email']?.toString() ?? '';
-
             final role =
                 employee['role']?.toString() ?? 'employee';
 
             return Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.all(21),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 9,
+              ),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: AppColors.border,
-                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
               ),
               child: Row(
                 children: [
                   CircleAvatar(
-                    radius: 27,
-                    backgroundColor:
-                        AppColors.primarySurface,
+                    radius: 21,
+                    backgroundColor: AppColors.primarySurface,
                     foregroundColor: AppColors.primary,
                     child: Text(
                       initials(name),
                       style: const TextStyle(
-                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 11),
                   Expanded(
                     child: Column(
                       crossAxisAlignment:
@@ -3069,83 +3080,111 @@ Widget buildMembersSection() {
                           name,
                           style: const TextStyle(
                             color: AppColors.textPrimary,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 3),
                         Text(
                           email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: AppColors.textSecondary,
+                            fontSize: 11,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 3),
                         Text(
                           '${role.toUpperCase()} • '
                           '${employee['status']?.toString() ?? 'PENDING'}',
                           style: const TextStyle(
                             color: AppColors.textMuted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 9,
+                            fontWeight: FontWeight.normal,
                           ),
                         ),
                       ],
                     ),
                   ),
                   if (isAdmin)
-  Wrap(
-    spacing: 10,
-    runSpacing: 10,
-    children: [
-      FilledButton.icon(
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 15,
-          ),
-        ),
-        onPressed: saving
-            ? null
-            : () {
-                resendWorkspaceInvitation(employee);
-              },
-        icon: const Icon(Icons.refresh_outlined),
-        label: const Text("Resend"),
-      ),
-      OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.danger,
-          side: const BorderSide(
-            color: AppColors.danger,
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 15,
-          ),
-        ),
-        onPressed: saving
-            ? null
-            : () {
-                cancelWorkspaceInvitation(employee);
-              },
-        icon: const Icon(Icons.cancel_outlined),
-        label: const Text("Cancel"),
-      ),
-    ],
-  ),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 31),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: saving
+                              ? null
+                              : () {
+                                  resendWorkspaceInvitation(employee);
+                                },
+                          icon: const Icon(
+                            Icons.refresh_outlined,
+                            size: 14,
+                          ),
+                          label: const Text(
+                            'Resend',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.danger,
+                            side: const BorderSide(
+                              color: AppColors.danger,
+                            ),
+                            minimumSize: const Size(0, 31),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: saving
+                              ? null
+                              : () {
+                                  cancelWorkspaceInvitation(employee);
+                                },
+                          icon: const Icon(
+                            Icons.cancel_outlined,
+                            size: 14,
+                          ),
+                          label: const Text(
+                            'Cancel',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             );
-          },
-        ),
+          }),
       ],
     );
   }
 
   Widget buildProjectsSection() {
+    final filteredProjects = projects.where((project) {
+      if (workspaceKpiSearch.isEmpty) {
+        return true;
+      }
+
+      final projectName =
+          project['project_name']?.toString().trim().toLowerCase() ?? '';
+
+      return projectName.contains(workspaceKpiSearch);
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3155,7 +3194,7 @@ Widget buildMembersSection() {
               'Review project members, ownership and availability.',
           count: projects.length,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
         if (projects.isEmpty)
           emptySection(
             icon: Icons.folder_off_outlined,
@@ -3163,8 +3202,14 @@ Widget buildMembersSection() {
             subtitle:
                 'Create projects from Project Management.',
           )
+        else if (filteredProjects.isEmpty)
+          emptySection(
+            icon: Icons.search_off_outlined,
+            title: 'No projects found',
+            subtitle: 'Try a different project name.',
+          )
         else
-          ...projects.map(buildProjectCard),
+          ...filteredProjects.map(buildProjectCard),
       ],
     );
   }
@@ -3187,40 +3232,47 @@ Widget buildMembersSection() {
     final isActive =
         project['is_active'] != false;
 
-    final creatorName =
-        getCreatorName(project['created_by']);
+    final runningCount = runningEntries
+        .where(
+          (e) =>
+              e['project_id']?.toString() == projectId,
+        )
+        .length;
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 18),
-      padding: const EdgeInsets.all(25),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 13,
+        vertical: 9,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x09000000),
-            blurRadius: 18,
-            offset: Offset(0, 7),
+            color: Color(0x06000000),
+            blurRadius: 5,
+            offset: Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 65,
-                height: 65,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: isActive
                       ? AppColors.primarySurface
                       : AppColors.background,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: isActive
                         ? AppColors.primaryLight
@@ -3229,23 +3281,23 @@ Widget buildMembersSection() {
                 ),
                 child: Icon(
                   isActive
-    ? Icons.folder_open
-    : Icons.folder_off,
+                      ? Icons.folder_open
+                      : Icons.folder_off,
                   color: isActive
                       ? AppColors.primary
                       : AppColors.textMuted,
-                  size: 33,
+                  size: 20,
                 ),
               ),
-              const SizedBox(width: 18),
+              const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
                     Wrap(
-                      spacing: 10,
-                      runSpacing: 8,
+                      spacing: 7,
+                      runSpacing: 3,
                       crossAxisAlignment:
                           WrapCrossAlignment.center,
                       children: [
@@ -3253,14 +3305,14 @@ Widget buildMembersSection() {
                           displayName,
                           style: const TextStyle(
                             color: AppColors.textPrimary,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
+                            horizontal: 7,
+                            vertical: 2,
                           ),
                           decoration: BoxDecoration(
                             color: isActive
@@ -3269,7 +3321,7 @@ Widget buildMembersSection() {
                                   )
                                 : AppColors.background,
                             borderRadius:
-                                BorderRadius.circular(20),
+                                BorderRadius.circular(12),
                           ),
                           child: Text(
                             isActive ? 'ACTIVE' : 'ARCHIVED',
@@ -3277,22 +3329,18 @@ Widget buildMembersSection() {
                               color: isActive
                                   ? AppColors.success
                                   : AppColors.textMuted,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 9),
+                    const SizedBox(height: 5),
                     Wrap(
-                      spacing: 20,
-                      runSpacing: 8,
+                      spacing: 11,
+                      runSpacing: 3,
                       children: [
-                        infoLabel(
-  Icons.calendar_today_outlined,
-  formatCreatedDate(project['created_at']),
-),
                         infoLabel(
                           Icons.calendar_today_outlined,
                           formatCreatedDate(
@@ -3304,9 +3352,9 @@ Widget buildMembersSection() {
                           '${projectEmployees.length} members',
                         ),
                         infoLabel(
-  Icons.play_circle_fill_outlined,
-  '${runningEntries.where((e) => e["project_id"]?.toString() == projectId).length} running',
-),
+                          Icons.play_circle_fill_outlined,
+                          '$runningCount running',
+                        ),
                       ],
                     ),
                   ],
@@ -3314,8 +3362,7 @@ Widget buildMembersSection() {
               ),
               if (isAdmin)
                 Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                  spacing: 6,
                   children: [
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
@@ -3323,33 +3370,45 @@ Widget buildMembersSection() {
                         side: const BorderSide(
                           color: AppColors.primary,
                         ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 15,
+                        minimumSize: const Size(0, 31),
+                        padding:
+                            const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
                         ),
+                        visualDensity:
+                            VisualDensity.compact,
                       ),
                       onPressed: () {
-                        showManageProjectEmployeesDialog(project);
+                        showManageProjectEmployeesDialog(
+                          project,
+                        );
                       },
                       icon: const Icon(
                         Icons.group_add_outlined,
+                        size: 14,
                       ),
                       label: const Text(
                         'Manage Employees',
                         style: TextStyle(
-                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
                     OutlinedButton.icon(
-                      style: TextButton.styleFrom(
+                      style: OutlinedButton.styleFrom(
                         foregroundColor: isActive
                             ? AppColors.textSecondary
                             : AppColors.success,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 15,
+                        minimumSize: const Size(0, 31),
+                        padding:
+                            const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 6,
                         ),
+                        visualDensity:
+                            VisualDensity.compact,
                       ),
                       onPressed: () {
                         toggleProjectStatus(project);
@@ -3358,85 +3417,85 @@ Widget buildMembersSection() {
                         isActive
                             ? Icons.archive_outlined
                             : Icons.unarchive_outlined,
+                        size: 14,
                       ),
                       label: Text(
                         isActive ? 'Archive' : 'Activate',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.normal,
+                        ),
                       ),
                     ),
                   ],
                 ),
             ],
           ),
-          const SizedBox(height: 21),
-          const Divider(
-            color: AppColors.border,
-            height: 1,
-          ),
-          const SizedBox(height: 19),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: projectEmployees.isEmpty
-                ? const Text(
-                    'No employees assigned to this project.',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                    ),
-                  )
-                : Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: projectEmployees.map(
-                      (employee) {
-                        final name =
-                            employee['full_name']
-                                    ?.toString()
-                                    .trim() ??
-                                'Employee';
+          if (projectEmployees.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Divider(
+              color: AppColors.border,
+              height: 1,
+            ),
+            const SizedBox(height: 7),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 5,
+                children: projectEmployees.map((employee) {
+                  final name =
+                      employee['full_name']
+                              ?.toString()
+                              .trim() ??
+                          'Employee';
 
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primarySurface,
-                            borderRadius:
-                                BorderRadius.circular(22),
-                            border: Border.all(
-                              color: AppColors.primaryLight,
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySurface,
+                      borderRadius:
+                          BorderRadius.circular(14),
+                      border: Border.all(
+                        color: AppColors.primaryLight,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircleAvatar(
+                          radius: 8,
+                          backgroundColor:
+                              AppColors.primary,
+                          foregroundColor:
+                              Colors.white,
+                          child: Text(
+                            initials(name),
+                            style: const TextStyle(
+                              fontSize: 6,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircleAvatar(
-                                radius: 14,
-                                backgroundColor:
-                                    AppColors.primary,
-                                foregroundColor: Colors.white,
-                                child: Text(
-                                  initials(name),
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                name,
-                                style: const TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          name,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.normal,
                           ),
-                        );
-                      },
-                    ).toList(),
-                  ),
-          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -3448,7 +3507,7 @@ Widget buildMembersSection() {
     required int count,
   }) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Column(
@@ -3458,16 +3517,17 @@ Widget buildMembersSection() {
                 title,
                 style: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontSize: 25,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               Text(
                 subtitle,
                 style: const TextStyle(
                   color: AppColors.textSecondary,
-                  fontSize: 14,
+                  fontSize: 11,
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ],
@@ -3475,12 +3535,12 @@ Widget buildMembersSection() {
         ),
         Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 8,
+            horizontal: 9,
+            vertical: 4,
           ),
           decoration: BoxDecoration(
             color: AppColors.primarySurface,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: AppColors.primaryLight,
             ),
@@ -3489,7 +3549,8 @@ Widget buildMembersSection() {
             count.toString(),
             style: const TextStyle(
               color: AppColors.primary,
-              fontWeight: FontWeight.bold,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -3659,7 +3720,7 @@ Widget buildMembersSection() {
   Widget buildErrorState() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(30),
+        padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -3678,7 +3739,7 @@ Widget buildMembersSection() {
                 fontSize: 16,
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
             FilledButton.icon(
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,

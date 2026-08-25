@@ -289,36 +289,36 @@ class _WeeklyReportScreenState
     Color accentColor = AppColors.primary,
   }) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(11),
         border: Border.all(
           color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
             color: Color(0x08000000),
-            blurRadius: 14,
-            offset: Offset(0, 5),
+            blurRadius: 10,
+            offset: Offset(0, 3),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: accentColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
               icon,
               color: accentColor,
             ),
           ),
-          const SizedBox(width: 15),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment:
@@ -328,16 +328,16 @@ class _WeeklyReportScreenState
                   title,
                   style: const TextStyle(
                     color: AppColors.textSecondary,
-                    fontSize: 13,
+                    fontSize: 12,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 3),
                 Text(
                   value,
                   style: const TextStyle(
                     color: AppColors.textPrimary,
-                    fontSize: 21,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -367,12 +367,17 @@ class _WeeklyReportScreenState
                 ),
                 headingTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w600,
                 ),
                 dataTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
                 ),
-                dividerThickness: 0.8,
+                dividerThickness: 0.6,
+                headingRowHeight: 38,
+                dataRowMinHeight: 38,
+                dataRowMaxHeight: 42,
+                horizontalMargin: 12,
+                columnSpacing: 28,
                 columns: const [
                   DataColumn(
                     label: Text('Employee'),
@@ -418,7 +423,7 @@ class _WeeklyReportScreenState
                         Row(
                           children: [
                             CircleAvatar(
-                              radius: 17,
+                              radius: 14,
                               backgroundColor:
                                   AppColors.primaryLight,
                               child: Text(
@@ -430,13 +435,13 @@ class _WeeklyReportScreenState
                                 style: const TextStyle(
                                   color:
                                       AppColors.primaryDark,
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   fontWeight:
                                       FontWeight.bold,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 9),
+                            const SizedBox(width: 7),
                             Text(
                               row['employee']?.toString() ??
                                   '',
@@ -497,12 +502,17 @@ class _WeeklyReportScreenState
                 ),
                 headingTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w600,
                 ),
                 dataTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
                 ),
-                dividerThickness: 0.8,
+                dividerThickness: 0.6,
+                headingRowHeight: 38,
+                dataRowMinHeight: 38,
+                dataRowMaxHeight: 42,
+                horizontalMargin: 12,
+                columnSpacing: 28,
                 columns: const [
                   DataColumn(
                     label: Text('Employee'),
@@ -592,12 +602,17 @@ class _WeeklyReportScreenState
                 ),
                 headingTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w600,
                 ),
                 dataTextStyle: const TextStyle(
                   color: AppColors.textPrimary,
                 ),
-                dividerThickness: 0.8,
+                dividerThickness: 0.6,
+                headingRowHeight: 38,
+                dataRowMinHeight: 38,
+                dataRowMaxHeight: 42,
+                horizontalMargin: 12,
+                columnSpacing: 28,
                 columns: [
                   DataColumn(
                     label: Text(firstColumn),
@@ -623,7 +638,7 @@ class _WeeklyReportScreenState
                           formatHours(entry.value),
                           style: const TextStyle(
                             color: AppColors.primary,
-                            fontWeight: FontWeight.bold,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -643,18 +658,18 @@ class _WeeklyReportScreenState
   }) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(11),
         border: Border.all(
           color: AppColors.border,
         ),
         boxShadow: const [
           BoxShadow(
             color: Color(0x08000000),
-            blurRadius: 14,
-            offset: Offset(0, 5),
+            blurRadius: 10,
+            offset: Offset(0, 3),
           ),
         ],
       ),
@@ -665,19 +680,19 @@ class _WeeklyReportScreenState
           Row(
             children: [
               Container(
-                width: 43,
-                height: 43,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: AppColors.primaryLight,
                   borderRadius:
-                      BorderRadius.circular(12),
+                      BorderRadius.circular(9),
                 ),
                 child: Icon(
                   icon,
                   color: AppColors.primary,
                 ),
               ),
-              const SizedBox(width: 13),
+              const SizedBox(width: 7),
               Expanded(
                 child: Column(
                   crossAxisAlignment:
@@ -687,8 +702,8 @@ class _WeeklyReportScreenState
                       title,
                       style: const TextStyle(
                         color: AppColors.textPrimary,
-                        fontSize: 21,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -697,7 +712,7 @@ class _WeeklyReportScreenState
                       style: const TextStyle(
                         color:
                             AppColors.textSecondary,
-                        fontSize: 13,
+                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -705,7 +720,7 @@ class _WeeklyReportScreenState
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           child,
         ],
       ),
@@ -721,8 +736,8 @@ class _WeeklyReportScreenState
 
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
+        horizontal: 8,
+        vertical: 4,
       ),
       decoration: BoxDecoration(
         color: color.withOpacity(0.11),
@@ -736,15 +751,15 @@ class _WeeklyReportScreenState
                 ? Icons.warning_amber_rounded
                 : Icons.check_circle_outline,
             color: color,
-            size: 16,
+            size: 14,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Text(
             below ? 'Below Target' : 'On Target',
             style: TextStyle(
               color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -756,8 +771,8 @@ class _WeeklyReportScreenState
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
-        vertical: 35,
-        horizontal: 20,
+        vertical: 22,
+        horizontal: 16,
       ),
       alignment: Alignment.center,
       decoration: BoxDecoration(
@@ -844,11 +859,12 @@ class _WeeklyReportScreenState
         foregroundColor: Colors.white,
         centerTitle: true,
         elevation: 0,
+        toolbarHeight: 54,
         title: const Text(
           'Weekly Reports',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
@@ -874,12 +890,12 @@ class _WeeklyReportScreenState
                   child: SingleChildScrollView(
                     physics:
                         const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(25),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     child: Center(
                       child: Container(
                         constraints:
                             const BoxConstraints(
-                          maxWidth: 1200,
+                          maxWidth: 1320,
                         ),
                         child: Column(
                           crossAxisAlignment:
@@ -890,21 +906,21 @@ class _WeeklyReportScreenState
                               style: TextStyle(
                                 color:
                                     AppColors.textPrimary,
-                                fontSize: 29,
+                                fontSize: 22,
                                 fontWeight:
                                     FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 7),
+                            const SizedBox(height: 4),
                             const Text(
                               'Review employee hours, project totals and weekly compliance.',
                               style: TextStyle(
                                 color: AppColors
                                     .textSecondary,
-                                fontSize: 15,
+                                fontSize: 13,
                               ),
                             ),
-                            const SizedBox(height: 22),
+                            const SizedBox(height: 14),
                             LayoutBuilder(
                               builder:
                                   (context, constraints) {
@@ -926,8 +942,8 @@ class _WeeklyReportScreenState
                                                 .maxWidth;
 
                                 return Wrap(
-                                  spacing: 15,
-                                  runSpacing: 15,
+                                  spacing: 10,
+                                  runSpacing: 10,
                                   children: [
                                     SizedBox(
                                       width: cardWidth,
@@ -959,7 +975,7 @@ class _WeeklyReportScreenState
                                       child: summaryCard(
                                         icon: Icons
                                             .folder_outlined,
-                                        title: 'Projects',
+                                        title: 'Projects Tracked',
                                         value:
                                             projectTotals
                                                 .length
@@ -989,11 +1005,11 @@ class _WeeklyReportScreenState
                                 );
                               },
                             ),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 16),
                             weeklyComplianceReport(),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 16),
                             dailyEmployeeReport(),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 16),
                             reportSection(
                               title:
                                   'Weekly Hours by Employee',
@@ -1004,7 +1020,7 @@ class _WeeklyReportScreenState
                               icon:
                                   Icons.people_alt_outlined,
                             ),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 16),
                             reportSection(
                               title:
                                   'Weekly Hours by Project',
@@ -1015,7 +1031,7 @@ class _WeeklyReportScreenState
                               icon:
                                   Icons.folder_copy_outlined,
                             ),
-                            const SizedBox(height: 35),
+                            const SizedBox(height: 18),
                           ],
                         ),
                       ),

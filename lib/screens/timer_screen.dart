@@ -332,6 +332,14 @@ if (!isRunning &&
       return;
     }
 
+    if (workspaceSubscriptionBlocked) {
+      _showMessage(
+        'Your workspace subscription is inactive. Please contact your administrator.',
+        isError: true,
+      );
+      return;
+    }
+
     if (selectedProjectId == null) {
       _showMessage(
         projects.isEmpty && !isAdmin
