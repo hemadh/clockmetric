@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:encrypter_plus/encrypter_plus.dart' as encrypt;
+import 'package:encrypter_plus/encrypter_plus.dart'
+    as encrypt;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart';
@@ -12,14 +13,26 @@ class ScreenshotSchedulerService {
 
   ScreenshotSchedulerService._internal();
 
-  Timer? _timer;
+  Timer? _watchdogTimer;
+  Timer? _initialCaptureTimer;
+
   String? _entryId;
   String? _projectId;
 
   bool _captureInProgress = false;
 
-  // Change this only if your Supabase Storage bucket has another name.
-  static const String _storageBucket = 'employee-screenshots';
+  DateTime? _lastSuccessfulCaptureAt;
+
+  static const Duration _screenshotInterval =
+      Duration(minutes: 5);
+
+  // Check frequently so a failed screenshot can be retried
+  // instead of waiting another full 5 minutes.
+  static const Duration _watchdogInterval =
+      Duration(seconds: 30);
+
+  static const String _storageBucket =
+      'employee-screenshots';
 
   final encrypt.Key _key = encrypt.Key.fromUtf8(
     '12345678901234567890123456789012',
@@ -33,58 +46,109 @@ class ScreenshotSchedulerService {
     required String entryId,
     required String? projectId,
   }) {
-    if (entryId.trim().isEmpty) {
-      print('Screenshot scheduler not started: entry ID is empty.');
+    final String cleanEntryId = entryId.trim();
+
+    if (cleanEntryId.isEmpty) {
+      print(
+        'Screenshot scheduler not started: '
+        'entry ID is empty.',
+      );
       return;
     }
 
-    if (currentUserRole.trim().toLowerCase() == 'admin') {
-      print('Screenshot scheduler skipped for admin.');
+    if (currentUserRole.trim().toLowerCase() ==
+        'admin') {
+      print(
+        'Screenshot scheduler skipped for admin.',
+      );
       return;
     }
 
-    if (_timer != null &&
-        _timer!.isActive &&
-        _entryId == entryId) {
+    if (isRunning &&
+        _entryId == cleanEntryId) {
       print(
         'Screenshot scheduler is already running '
-        'for entry $entryId.',
+        'for entry $cleanEntryId.',
       );
       return;
     }
 
     stop();
 
-    _entryId = entryId;
+    _entryId = cleanEntryId;
     _projectId = projectId;
+    _lastSuccessfulCaptureAt = null;
 
     print(
-      'Screenshot scheduler started for entry: $_entryId',
+      'Screenshot scheduler started for entry: '
+      '$_entryId',
     );
 
-    // Take one screenshot soon after starting.
-    Future.delayed(
+    // First screenshot shortly after timer starts.
+    _initialCaptureTimer = Timer(
       const Duration(seconds: 10),
       () async {
-        if (_entryId == entryId) {
+        if (_entryId == cleanEntryId) {
           await captureNow();
         }
       },
     );
 
-    // TESTING: screenshot every 30 seconds.
-    // Change this to Duration(minutes: 5) after testing.
-    _timer = Timer.periodic(
-      const Duration(minutes: 5),
+    // Instead of only trying once every 5 minutes,
+    // check every 30 seconds whether a screenshot
+    // is due.
+    _watchdogTimer = Timer.periodic(
+      _watchdogInterval,
       (_) async {
-        await captureNow();
+        await _checkAndCapture();
       },
     );
   }
 
+  Future<void> _checkAndCapture() async {
+    if (_captureInProgress) {
+      return;
+    }
+
+    final String? currentEntryId = _entryId;
+
+    if (currentEntryId == null ||
+        currentEntryId.trim().isEmpty) {
+      return;
+    }
+
+    final DateTime? lastCapture =
+        _lastSuccessfulCaptureAt;
+
+    // If there has never been a successful screenshot,
+    // try immediately.
+    if (lastCapture == null) {
+      await captureNow();
+      return;
+    }
+
+    final Duration elapsed =
+        DateTime.now().toUtc().difference(
+      lastCapture,
+    );
+
+    if (elapsed >= _screenshotInterval) {
+      print(
+        'Screenshot is due. '
+        'Last successful screenshot: '
+        '${lastCapture.toLocal()}',
+      );
+
+      await captureNow();
+    }
+  }
+
   void stop() {
-    _timer?.cancel();
-    _timer = null;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
+
+    _initialCaptureTimer?.cancel();
+    _initialCaptureTimer = null;
 
     print(
       'Screenshot scheduler stopped. '
@@ -93,7 +157,7 @@ class ScreenshotSchedulerService {
 
     _entryId = null;
     _projectId = null;
-    _captureInProgress = false;
+    _lastSuccessfulCaptureAt = null;
   }
 
   DateTime _calculateScreenshotExpiry(
@@ -102,19 +166,21 @@ class ScreenshotSchedulerService {
     final DateTime localCapturedAt =
         capturedAt.toLocal();
 
-    // Monday = 1 and Sunday = 7.
     final int daysUntilSunday =
-        DateTime.sunday - localCapturedAt.weekday;
+        DateTime.sunday -
+            localCapturedAt.weekday;
 
-    final DateTime captureWeekSunday = DateTime(
+    final DateTime captureWeekSunday =
+        DateTime(
       localCapturedAt.year,
       localCapturedAt.month,
       localCapturedAt.day,
     ).add(
-      Duration(days: daysUntilSunday),
+      Duration(
+        days: daysUntilSunday,
+      ),
     );
 
-    // Delete at midnight on the second Monday.
     return captureWeekSunday.add(
       const Duration(days: 8),
     );
@@ -128,20 +194,34 @@ class ScreenshotSchedulerService {
           await supabase
               .from('time_entries')
               .select('id')
-              .eq('id', entryId)
-              .eq('employee_id', currentUserId)
-              .eq('workspace_id', currentWorkspaceId)
-              .filter('end_time', 'is', null)
+              .eq(
+                'id',
+                entryId,
+              )
+              .eq(
+                'employee_id',
+                currentUserId,
+              )
+              .eq(
+                'workspace_id',
+                currentWorkspaceId,
+              )
+              .filter(
+                'end_time',
+                'is',
+                null,
+              )
               .maybeSingle();
 
       return runningEntry != null;
     } catch (error) {
       print(
-        'Could not verify running time entry: $error',
+        'Could not verify running time entry: '
+        '$error',
       );
 
-      // Do not stop screenshots because of a temporary
-      // database or internet failure.
+      // Temporary internet/database issues should
+      // not immediately stop screenshot monitoring.
       return true;
     }
   }
@@ -149,13 +229,14 @@ class ScreenshotSchedulerService {
   Future<void> captureNow() async {
     if (_captureInProgress) {
       print(
-        'Screenshot skipped because another capture '
-        'is still running.',
+        'Screenshot skipped because another '
+        'capture is still running.',
       );
       return;
     }
 
-    final String? currentEntryId = _entryId;
+    final String? currentEntryId =
+        _entryId;
 
     if (currentEntryId == null ||
         currentEntryId.trim().isEmpty) {
@@ -166,30 +247,32 @@ class ScreenshotSchedulerService {
       return;
     }
 
-    if (currentUserRole.trim().toLowerCase() ==
+    if (currentUserRole
+            .trim()
+            .toLowerCase() ==
         'admin') {
       return;
     }
 
     if (currentUserId.trim().isEmpty) {
       print(
-        'Screenshot skipped because user ID is empty.',
+        'Screenshot skipped because '
+        'user ID is empty.',
       );
       return;
     }
 
-    if (currentWorkspaceId.trim().isEmpty) {
+    if (currentWorkspaceId
+        .trim()
+        .isEmpty) {
       print(
-        'Screenshot skipped because workspace ID '
-        'is empty.',
+        'Screenshot skipped because '
+        'workspace ID is empty.',
       );
       return;
     }
 
     _captureInProgress = true;
-
-    final DateTime capturedAt =
-        DateTime.now().toUtc();
 
     String? uploadedStoragePath;
 
@@ -209,17 +292,43 @@ class ScreenshotSchedulerService {
         return;
       }
 
+      // Make sure the active entry did not change
+      // while the database request was running.
+      if (_entryId != currentEntryId) {
+        print(
+          'Screenshot cancelled because '
+          'active entry changed.',
+        );
+        return;
+      }
+
+      final DateTime capturedAt =
+          DateTime.now().toUtc();
+
       print(
         'Starting screenshot capture at '
         '${capturedAt.toLocal()}',
       );
 
       final List<int>? rawBytes =
-          await ScreenshotCaptureService().capture();
+          await ScreenshotCaptureService()
+              .capture();
 
-      if (rawBytes == null || rawBytes.isEmpty) {
+      if (rawBytes == null ||
+          rawBytes.isEmpty) {
         print(
-          'Screenshot capture returned no image data.',
+          'Screenshot capture returned no '
+          'image data. Will retry soon.',
+        );
+        return;
+      }
+
+      // Check again in case timer was stopped
+      // during screenshot capture.
+      if (_entryId != currentEntryId) {
+        print(
+          'Screenshot cancelled because '
+          'timer stopped or entry changed.',
         );
         return;
       }
@@ -245,22 +354,27 @@ class ScreenshotSchedulerService {
 
       final String safeEmployeeName =
           employeeName.replaceAll(
-        RegExp(r'[^a-zA-Z0-9_-]'),
+        RegExp(
+          r'[^a-zA-Z0-9_-]',
+        ),
         '_',
       );
 
       final int timestamp =
-          capturedAt.millisecondsSinceEpoch;
+          capturedAt
+              .millisecondsSinceEpoch;
 
       final String encryptedFileName =
-          '${safeEmployeeName}_$timestamp.enc';
+          '${safeEmployeeName}_'
+          '$timestamp.enc';
 
       final String storagePath =
           '$currentWorkspaceId/'
           '$currentUserId/'
           '$encryptedFileName';
 
-      uploadedStoragePath = storagePath;
+      uploadedStoragePath =
+          storagePath;
 
       print(
         'Uploading encrypted screenshot to: '
@@ -272,7 +386,8 @@ class ScreenshotSchedulerService {
           .uploadBinary(
             storagePath,
             encrypted.bytes,
-            fileOptions: const FileOptions(
+            fileOptions:
+                const FileOptions(
               contentType:
                   'application/octet-stream',
               upsert: false,
@@ -280,36 +395,89 @@ class ScreenshotSchedulerService {
           );
 
       print(
-        'Screenshot uploaded to Supabase Storage.',
+        'Screenshot uploaded to '
+        'Supabase Storage.',
       );
 
-      await supabase.from('screenshots').insert({
-        'employee_id': currentUserId,
-        'workspace_id': currentWorkspaceId,
-        'employee_name': employeeName,
-        'time_entry_id': currentEntryId,
-        'project_id': _projectId,
-        'image_path': 'private',
-        'secure_image_path': storagePath,
-        'image_url': null,
-        'image_status': 'private',
+      // Timer might have been stopped while upload
+      // was in progress.
+      if (_entryId != currentEntryId) {
+        print(
+          'Timer stopped during upload. '
+          'Removing screenshot.',
+        );
+
+        try {
+          await supabase.storage
+              .from(_storageBucket)
+              .remove([
+            storagePath,
+          ]);
+        } catch (error) {
+          print(
+            'Could not remove screenshot: '
+            '$error',
+          );
+        }
+
+        uploadedStoragePath = null;
+
+        return;
+      }
+
+      await supabase
+          .from('screenshots')
+          .insert({
+        'employee_id':
+            currentUserId,
+        'workspace_id':
+            currentWorkspaceId,
+        'employee_name':
+            employeeName,
+        'time_entry_id':
+            currentEntryId,
+        'project_id':
+            _projectId,
+        'image_path':
+            'private',
+        'secure_image_path':
+            storagePath,
+        'image_url':
+            null,
+        'image_status':
+            'private',
         'captured_at':
-            capturedAt.toIso8601String(),
+            capturedAt
+                .toIso8601String(),
         'expires_at':
             _calculateScreenshotExpiry(
           capturedAt,
         ).toUtc().toIso8601String(),
       });
 
+      // Only update this AFTER both storage upload
+      // and database insert succeed.
+      _lastSuccessfulCaptureAt =
+          capturedAt;
+
+      uploadedStoragePath = null;
+
       print(
-        'Screenshot database record created '
-        'successfully at ${capturedAt.toLocal()}',
+        'Screenshot saved successfully at '
+        '${capturedAt.toLocal()}. '
+        'Next screenshot due in '
+        '5 minutes.',
       );
     } catch (error, stackTrace) {
-      print('Screenshot capture failed: $error');
+      print(
+        'Screenshot capture failed: '
+        '$error',
+      );
+
       print(stackTrace);
 
-      // Remove uploaded file when the database insert fails.
+      // Because our watchdog checks every 30 seconds,
+      // failed captures will be retried soon.
       if (uploadedStoragePath != null) {
         try {
           await supabase.storage
@@ -319,12 +487,13 @@ class ScreenshotSchedulerService {
           ]);
 
           print(
-            'Removed incomplete screenshot upload.',
+            'Removed incomplete '
+            'screenshot upload.',
           );
         } catch (cleanupError) {
           print(
-            'Could not remove incomplete upload: '
-            '$cleanupError',
+            'Could not remove incomplete '
+            'upload: $cleanupError',
           );
         }
       }
@@ -334,7 +503,13 @@ class ScreenshotSchedulerService {
   }
 
   bool get isRunning =>
-      _timer != null && _timer!.isActive;
+      _watchdogTimer != null &&
+      _watchdogTimer!.isActive &&
+      _entryId != null;
 
-  String? get activeEntryId => _entryId;
+  String? get activeEntryId =>
+      _entryId;
+
+  DateTime? get lastSuccessfulCaptureAt =>
+      _lastSuccessfulCaptureAt;
 }

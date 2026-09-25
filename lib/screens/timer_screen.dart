@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/screenshot_scheduler_service.dart';
 import '../services/time_entry_service.dart';
+import '../services/timer_safety_service.dart';
 import '../theme/app_colors.dart';
 
 class TimerScreen extends StatefulWidget {
@@ -41,16 +42,47 @@ class _TimerScreenState extends State<TimerScreen> {
     return currentUserRole.toLowerCase() == 'admin';
   }
 
+  bool get isMasterAdmin {
+    return currentUserRole.toLowerCase() == 'master_admin';
+  }
+
+  bool get canUseTimer {
+    return currentUserRole.toLowerCase() == 'employee';
+  }
+
+  bool get requiresDesktopApp {
+    return clockMetricWeb && canUseTimer;
+  }
+
   @override
   void initState() {
     super.initState();
+
+    TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .addListener(
+          _handleForcedTimerStop,
+        );
+
     initializeScreen();
   }
 
   Future<void> initializeScreen() async {
     try {
+      if (canUseTimer &&
+          !clockMetricWeb &&
+          currentUserId.isNotEmpty &&
+          currentWorkspaceId.isNotEmpty) {
+        await TimerSafetyService.instance
+            .startForEmployee(
+          userId: currentUserId,
+          workspaceId: currentWorkspaceId,
+        );
+      }
+
       await loadProjects();
-await loadRunningTimer();
+      await loadRunningTimer();
 
 if (!isRunning &&
     widget.initialProjectId != null &&
@@ -65,7 +97,7 @@ if (!isRunning &&
     selectedProjectId = widget.initialProjectId;
   });
 
-  if (widget.autoStart && !isAdmin) {
+  if (widget.autoStart && canUseTimer && !clockMetricWeb) {
     await startTimer();
   }
 }
@@ -89,10 +121,58 @@ if (!isRunning &&
     }
   }
 
+  void _handleForcedTimerStop() {
+    final event = TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .value;
+
+    if (event == null ||
+        runningEntryId == null ||
+        event.entryId != runningEntryId) {
+      return;
+    }
+
+    timer?.cancel();
+
+    if (!mounted) return;
+
+    setState(() {
+      isRunning = false;
+      seconds = 0;
+      startTime = null;
+      runningEntryId = null;
+      actionLoading = false;
+      longTimerWarningShown = false;
+    });
+
+    final message =
+        event.reason ==
+                TimerAutoStopReason.internetLost
+            ? 'Internet connection was lost. '
+                'Your timer stopped automatically and '
+                'will not restart by itself.'
+            : 'Your timer stopped automatically because '
+                'your session ended.';
+
+    _showMessage(
+      message,
+      isError: true,
+    );
+  }
+
   Future<void> loadProjects() async {
+    if (isMasterAdmin) {
+      if (!mounted) return;
+      setState(() {
+        projects = [];
+      });
+      return;
+    }
+
     if (isAdmin) {
       await loadAdminProjects();
-    } else {
+    } else if (canUseTimer) {
       await loadEmployeeProjects();
     }
   }
@@ -206,6 +286,10 @@ if (!isRunning &&
   }
 
   Future<void> loadRunningTimer() async {
+    if (!canUseTimer || clockMetricWeb) {
+      return;
+    }
+
     final running =
         await TimeEntryService().getRunningEntry();
 
@@ -244,8 +328,21 @@ if (!isRunning &&
     startTicker();
 
     if (runningEntryId != null) {
-      ScreenshotSchedulerService.instance.start(
+      if (desktopTrackingAvailable) {
+        if (desktopTrackingAvailable) {
+          ScreenshotSchedulerService.instance.start(
+            entryId: runningEntryId!,
+            projectId: selectedProjectId,
+          );
+        }
+      }
+
+      await TimerSafetyService.instance
+          .registerRunningTimer(
         entryId: runningEntryId!,
+        startTime: startTime!,
+        userId: currentUserId,
+        workspaceId: currentWorkspaceId,
         projectId: selectedProjectId,
       );
     }
@@ -324,9 +421,17 @@ if (!isRunning &&
   }
 
   Future<void> startTimer() async {
-    if (isAdmin) {
+    if (!canUseTimer) {
       _showMessage(
-        'Admins cannot start timers.',
+        'Only employees can use the timer.',
+        isError: true,
+      );
+      return;
+    }
+
+    if (clockMetricWeb) {
+      _showMessage(
+        'Time tracking with screenshots requires the ClockMetric Desktop app.',
         isError: true,
       );
       return;
@@ -369,6 +474,21 @@ if (!isRunning &&
 
     if (actionLoading) return;
 
+    final online =
+        await TimerSafetyService.instance
+            .canStartTimer(
+      userId: currentUserId,
+      workspaceId: currentWorkspaceId,
+    );
+
+    if (!online) {
+      _showMessage(
+        'Internet connection is required to start the timer.',
+        isError: true,
+      );
+      return;
+    }
+
     setState(() {
       actionLoading = true;
     });
@@ -406,8 +526,19 @@ if (!isRunning &&
 
       startTicker();
 
-      ScreenshotSchedulerService.instance.start(
+      if (desktopTrackingAvailable) {
+        ScreenshotSchedulerService.instance.start(
+          entryId: entryId,
+          projectId: selectedProjectId,
+        );
+      }
+
+      await TimerSafetyService.instance
+          .registerRunningTimer(
         entryId: entryId,
+        startTime: newStartTime,
+        userId: currentUserId,
+        workspaceId: currentWorkspaceId,
         projectId: selectedProjectId,
       );
 
@@ -553,13 +684,22 @@ if (!isRunning &&
       actionLoading = true;
     });
 
+    final stoppedEntryId = runningEntryId!;
+
     try {
-      ScreenshotSchedulerService.instance.stop();
+      if (desktopTrackingAvailable) {
+        ScreenshotSchedulerService.instance.stop();
+      }
 
       await TimeEntryService().stopTimeEntry(
-        entryId: runningEntryId!,
+        entryId: stoppedEntryId,
         startTime: startTime!,
         note: note ?? '',
+      );
+
+      await TimerSafetyService.instance
+          .clearRunningTimer(
+        entryId: stoppedEntryId,
       );
 
       timer?.cancel();
@@ -585,7 +725,10 @@ if (!isRunning &&
         'Stop timer error: $error',
       );
 
-      if (runningEntryId != null) {
+      if (runningEntryId != null &&
+          TimerSafetyService.instance
+                  .activeEntryId ==
+              runningEntryId) {
         ScreenshotSchedulerService.instance.start(
           entryId: runningEntryId!,
           projectId: selectedProjectId,
@@ -654,21 +797,43 @@ if (!isRunning &&
         '${secs.toString().padLeft(2, '0')}';
   }
 
+  String _projectDisplayName(dynamic value) {
+    var name = value?.toString().trim() ?? '';
+
+    if (name.isEmpty) {
+      return 'Project: Unnamed Project';
+    }
+
+    name = name.replaceFirst(
+      RegExp(
+        r'^project\s*:\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    if (name.trim().isEmpty) {
+      return 'Project: Unnamed Project';
+    }
+
+    return 'Project: ${name.trim()}';
+  }
+
   String selectedProjectName() {
     if (selectedProjectId == null) {
-      return 'No project selected';
+      return 'Project: No project selected';
     }
 
     for (final project in projects) {
       if (project['id']?.toString() ==
           selectedProjectId) {
-        return project['project_name']
-                ?.toString() ??
-            'Selected project';
+        return _projectDisplayName(
+          project['project_name'],
+        );
       }
     }
 
-    return 'Selected project';
+    return 'Project: Selected project';
   }
 
   void _showMessage(
@@ -693,6 +858,13 @@ if (!isRunning &&
 
   @override
   void dispose() {
+    TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .removeListener(
+          _handleForcedTimerStop,
+        );
+
     timer?.cancel();
     super.dispose();
   }
@@ -711,6 +883,179 @@ if (!isRunning &&
                 )
             ? selectedProjectId
             : null;
+
+    if (!canUseTimer) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          title: const Text(
+            'Time Tracker',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        body: Center(
+          child: Container(
+            width: 560,
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.admin_panel_settings_outlined,
+                  size: 58,
+                  color: AppColors.primary,
+                ),
+                SizedBox(height: 18),
+                Text(
+                  'Timer is for employees only',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 10),
+                Text(
+                  'Admins and Super Admins can review and manage tracked work, '
+                  'but they are not tracked and cannot start a timer.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (requiresDesktopApp) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          title: const Text(
+            'Time Tracker',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        body: Center(
+          child: Container(
+            width: 620,
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(34),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppColors.border),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x0D000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.desktop_windows_outlined,
+                  size: 64,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Desktop App Required',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'You can use ClockMetric on the web to view your dashboard, '
+                  'timesheets and screenshots. To start tracked work with '
+                  'automatic screenshots and activity monitoring, use the '
+                  'ClockMetric Desktop app.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.primaryLight),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: AppColors.primary,
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Download ClockMetric for Windows from the ClockMetric '
+                          'website, install it, then sign in with this same account.',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Windows download: /ClockMetricSetup.exe',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -939,7 +1284,9 @@ if (!isRunning &&
                                   String>(
                                 value: projectId,
                                 child: Text(
-                                  projectName,
+                                  _projectDisplayName(
+                                    projectName,
+                                  ),
                                   overflow:
                                       TextOverflow
                                           .ellipsis,

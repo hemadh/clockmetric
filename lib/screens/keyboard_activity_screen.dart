@@ -14,7 +14,10 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
 
   List<Map<String, dynamic>> activities = [];
 
-  String selectedEmployee = 'All Employees';
+  // Employee identity is always the profile UUID.
+  // The visible name comes from profiles.full_name.
+  String selectedEmployeeId = 'all';
+  Map<String, String> employeeNamesById = {};
 
   // 0 = Today, 1 = Yesterday, etc.
   int selectedDayIndex = 0;
@@ -166,20 +169,44 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
                 ascending: false,
               );
 
+      final profileResponse = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .eq('workspace_id', currentWorkspaceId);
+
+      final profileRows =
+          List<Map<String, dynamic>>.from(profileResponse);
+
+      final namesById = <String, String>{};
+
+      for (final profile in profileRows) {
+        final id =
+            profile['id']?.toString().trim() ?? '';
+        final name =
+            profile['full_name']?.toString().trim() ?? '';
+
+        if (id.isNotEmpty && name.isNotEmpty) {
+          namesById[id] = name;
+        }
+      }
+
       if (!mounted) return;
 
       setState(() {
         activities =
             List<Map<String, dynamic>>.from(response);
+        employeeNamesById = namesById;
 
         loading = false;
 
         // Always start closed after loading.
         _expandedHours.clear();
 
-        if (selectedEmployee != 'All Employees' &&
-            !employeeNames.contains(selectedEmployee)) {
-          selectedEmployee = 'All Employees';
+        if (selectedEmployeeId != 'all' &&
+            !employeeOptions.any(
+              (option) => option.key == selectedEmployeeId,
+            )) {
+          selectedEmployeeId = 'all';
         }
       });
     } catch (e) {
@@ -197,45 +224,84 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
   // EMPLOYEE FILTER
   // ============================================================
 
-  List<String> get employeeNames {
-    final names = activities
+  String _employeeDisplayName(
+    Map<String, dynamic> activity,
+  ) {
+    final employeeId =
+        activity['employee_id']?.toString().trim() ?? '';
+
+    final profileName =
+        employeeNamesById[employeeId]?.trim() ?? '';
+
+    if (profileName.isNotEmpty) {
+      return profileName;
+    }
+
+    final savedName =
+        activity['employee_name']?.toString().trim() ?? '';
+
+    if (savedName.isNotEmpty) {
+      return savedName;
+    }
+
+    return 'Unknown Employee';
+  }
+
+  List<MapEntry<String, String>> get employeeOptions {
+    final ids = <String>{};
+
+    for (final activity in activities) {
+      final id =
+          activity['employee_id']?.toString().trim() ?? '';
+
+      if (id.isNotEmpty) {
+        ids.add(id);
+      }
+    }
+
+    final options = ids
         .map(
-          (activity) =>
-              activity['employee_name']
-                  ?.toString()
-                  .trim() ??
-              '',
+          (id) => MapEntry(
+            id,
+            employeeNamesById[id] ??
+                activities
+                    .where(
+                      (activity) =>
+                          activity['employee_id']
+                              ?.toString()
+                              .trim() ==
+                          id,
+                    )
+                    .map(_employeeDisplayName)
+                    .firstWhere(
+                      (name) => name.isNotEmpty,
+                      orElse: () => 'Unknown Employee',
+                    ),
+          ),
         )
-        .where(
-          (name) => name.isNotEmpty,
-        )
-        .toSet()
         .toList();
 
-    names.sort();
+    options.sort(
+      (a, b) => a.value
+          .toLowerCase()
+          .compareTo(b.value.toLowerCase()),
+    );
 
-    return names;
+    return options;
   }
 
   List<Map<String, dynamic>>
       get filteredActivities {
-    if (!isAdmin) {
-      return activities;
-    }
-
-    if (selectedEmployee == 'All Employees') {
+    if (!isAdmin || selectedEmployeeId == 'all') {
       return activities;
     }
 
     return activities.where(
       (activity) {
-        final name =
-            activity['employee_name']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final employeeId =
+            activity['employee_id']?.toString().trim() ?? '';
 
-        return name == selectedEmployee;
+        return employeeId == selectedEmployeeId;
       },
     ).toList();
   }
@@ -342,11 +408,10 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
 
   List<_HourActivityGroup>
       get groupedActivities {
-    final Map<String, _ActivitySlot>
-        slots = {};
+    // First merge all raw samples into real 15-minute slots.
+    final Map<String, _ActivitySlot> realSlots = {};
 
-    for (final activity
-        in filteredActivities) {
+    for (final activity in filteredActivities) {
       final sampleStart = parseTime(
         activity['sample_start'],
       );
@@ -355,50 +420,51 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
         continue;
       }
 
-      final employee =
-          activity['employee_name']
-                  ?.toString()
-                  .trim() ??
-              'Employee';
-
       final employeeId =
-          activity['employee_id']
-                  ?.toString() ??
-              '';
+          activity['employee_id']?.toString().trim() ?? '';
+
+      if (employeeId.isEmpty) {
+        continue;
+      }
+
+      final employeeName =
+          _employeeDisplayName(activity);
 
       final slotStart =
-          getFifteenMinuteStart(
-        sampleStart,
-      );
+          getFifteenMinuteStart(sampleStart);
 
       final key =
-          '${slotStart.toIso8601String()}_$employeeId';
+          '${employeeId}_${slotStart.toIso8601String()}';
 
-      if (!slots.containsKey(key)) {
-        slots[key] = _ActivitySlot(
+      final slot = realSlots.putIfAbsent(
+        key,
+        () => _ActivitySlot(
           slotStart: slotStart,
-          employeeName: employee,
+          employeeName: employeeName,
           employeeId: employeeId,
           keyboard: 0,
           mouse: 0,
-        );
-      }
+          hasSample: true,
+        ),
+      );
 
-      final existing = slots[key]!;
-
-      existing.keyboard += readInt(
+      slot.keyboard += readInt(
         activity['keyboard_presses'],
       );
 
-      existing.mouse += readInt(
+      slot.mouse += readInt(
         activity['mouse_movements'],
       );
     }
 
-    final Map<DateTime, List<_ActivitySlot>>
-        hourMap = {};
+    // Group real slots by employee + hour.
+    final Map<String, List<_ActivitySlot>>
+        slotsByEmployeeHour = {};
+    final Map<String, DateTime> hourStarts = {};
+    final Map<String, String> hourEmployeeIds = {};
+    final Map<String, String> hourEmployeeNames = {};
 
-    for (final slot in slots.values) {
+    for (final slot in realSlots.values) {
       final hourStart = DateTime(
         slot.slotStart.year,
         slot.slotStart.month,
@@ -406,63 +472,112 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
         slot.slotStart.hour,
       );
 
-      hourMap.putIfAbsent(
-        hourStart,
-        () => [],
+      final hourKey =
+          '${slot.employeeId}_${hourStart.toIso8601String()}';
+
+      slotsByEmployeeHour.putIfAbsent(
+        hourKey,
+        () => <_ActivitySlot>[],
       );
 
-      hourMap[hourStart]!.add(slot);
+      slotsByEmployeeHour[hourKey]!.add(slot);
+      hourStarts[hourKey] = hourStart;
+      hourEmployeeIds[hourKey] = slot.employeeId;
+      hourEmployeeNames[hourKey] = slot.employeeName;
     }
 
-    final hourKeys =
-        hourMap.keys.toList();
+    final result = <_HourActivityGroup>[];
 
-    hourKeys.sort(
-      (a, b) => b.compareTo(a),
-    );
+    for (final entry in slotsByEmployeeHour.entries) {
+      final key = entry.key;
+      final hourStart = hourStarts[key]!;
+      final employeeId = hourEmployeeIds[key]!;
+      final employeeName = hourEmployeeNames[key]!;
 
-    final result =
-        <_HourActivityGroup>[];
-
-    for (final hourStart
-        in hourKeys) {
-      final hourSlots =
-          hourMap[hourStart]!;
-
-      hourSlots.sort(
-        (a, b) {
-          final timeCompare =
-              b.slotStart.compareTo(
-            a.slotStart,
-          );
-
-          if (timeCompare != 0) {
-            return timeCompare;
-          }
-
-          return a.employeeName.compareTo(
-            b.employeeName,
-          );
-        },
-      );
+      // Only show 15-minute intervals that have a real activity record.
+      // Missing intervals are not created or displayed.
+      final realHourSlots = entry.value.toList()
+        ..sort(
+          (a, b) => a.slotStart.compareTo(b.slotStart),
+        );
 
       int keyboardTotal = 0;
       int mouseTotal = 0;
 
-      for (final slot in hourSlots) {
+      for (final slot in realHourSlots) {
         keyboardTotal += slot.keyboard;
         mouseTotal += slot.mouse;
       }
 
       result.add(
         _HourActivityGroup(
+          employeeId: employeeId,
+          employeeName: employeeName,
           hourStart: hourStart,
-          slots: hourSlots,
+          slots: realHourSlots,
           keyboardTotal: keyboardTotal,
           mouseTotal: mouseTotal,
         ),
       );
     }
+
+    result.sort(
+      (a, b) {
+        final employeeCompare = a.employeeName
+            .toLowerCase()
+            .compareTo(b.employeeName.toLowerCase());
+
+        if (employeeCompare != 0) {
+          return employeeCompare;
+        }
+
+        return b.hourStart.compareTo(a.hourStart);
+      },
+    );
+
+    return result;
+  }
+
+  List<_EmployeeActivityGroup>
+      get employeeActivityGroups {
+    final grouped =
+        <String, List<_HourActivityGroup>>{};
+
+    for (final hourGroup in groupedActivities) {
+      grouped.putIfAbsent(
+        hourGroup.employeeId,
+        () => <_HourActivityGroup>[],
+      );
+
+      grouped[hourGroup.employeeId]!.add(hourGroup);
+    }
+
+    final result = grouped.entries.map(
+      (entry) {
+        final hours = entry.value
+          ..sort(
+            (a, b) =>
+                b.hourStart.compareTo(a.hourStart),
+          );
+
+        final employeeName = hours.isEmpty
+            ? employeeNamesById[entry.key] ??
+                'Unknown Employee'
+            : hours.first.employeeName;
+
+        return _EmployeeActivityGroup(
+          employeeId: entry.key,
+          employeeName: employeeName,
+          hours: hours,
+        );
+      },
+    ).toList();
+
+    result.sort(
+      (a, b) => a.employeeName
+          .toLowerCase()
+          .compareTo(b.employeeName.toLowerCase()),
+    );
 
     return result;
   }
@@ -501,23 +616,23 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
   // ============================================================
 
   String hourKey(
-    DateTime hourStart,
+    _HourActivityGroup group,
   ) {
-    return hourStart.toIso8601String();
+    return '${group.employeeId}_${group.hourStart.toIso8601String()}';
   }
 
   bool isHourExpanded(
-    DateTime hourStart,
+    _HourActivityGroup group,
   ) {
     return _expandedHours.contains(
-      hourKey(hourStart),
+      hourKey(group),
     );
   }
 
   void toggleHour(
-    DateTime hourStart,
+    _HourActivityGroup group,
   ) {
-    final key = hourKey(hourStart);
+    final key = hourKey(group);
 
     setState(() {
       if (_expandedHours.contains(key)) {
@@ -541,8 +656,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
 
     setState(() {
       selectedDayIndex++;
-      selectedEmployee =
-          'All Employees';
+      selectedEmployeeId = 'all';
       _expandedHours.clear();
     });
 
@@ -557,8 +671,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
 
     setState(() {
       selectedDayIndex--;
-      selectedEmployee =
-          'All Employees';
+      selectedEmployeeId = 'all';
       _expandedHours.clear();
     });
 
@@ -575,8 +688,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
 
     setState(() {
       selectedDayIndex = dayIndex;
-      selectedEmployee =
-          'All Employees';
+      selectedEmployeeId = 'all';
       _expandedHours.clear();
     });
 
@@ -779,81 +891,56 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
     return SizedBox(
       width: 220,
       height: 34,
-      child:
-          DropdownButtonFormField<
-              String>(
-        value: selectedEmployee,
+      child: DropdownButtonFormField<String>(
+        value: selectedEmployeeId,
         isExpanded: true,
         isDense: true,
         style: const TextStyle(
           fontSize: 12,
-          color: Color(
-            0xFF1F2937,
-          ),
-          fontWeight:
-              FontWeight.w600,
+          color: Color(0xFF1F2937),
+          fontWeight: FontWeight.w600,
         ),
-        decoration:
-            InputDecoration(
+        decoration: InputDecoration(
           filled: true,
           fillColor: Colors.white,
           prefixIcon: const Icon(
             Icons.people_alt_rounded,
             size: 17,
-            color: Color(
-              0xFF64748B,
-            ),
+            color: Color(0xFF64748B),
           ),
           contentPadding:
-              const EdgeInsets
-                  .symmetric(
+              const EdgeInsets.symmetric(
             horizontal: 12,
             vertical: 11,
           ),
-          enabledBorder:
-              OutlineInputBorder(
+          enabledBorder: OutlineInputBorder(
             borderRadius:
-                BorderRadius.circular(
-              10,
-            ),
-            borderSide:
-                const BorderSide(
-              color: Color(
-                0xFFE2E8F0,
-              ),
+                BorderRadius.circular(10),
+            borderSide: const BorderSide(
+              color: Color(0xFFE2E8F0),
             ),
           ),
-          focusedBorder:
-              OutlineInputBorder(
+          focusedBorder: OutlineInputBorder(
             borderRadius:
-                BorderRadius.circular(
-              10,
-            ),
-            borderSide:
-                const BorderSide(
-              color: Color(
-                0xFFF97316,
-              ),
+                BorderRadius.circular(10),
+            borderSide: const BorderSide(
+              color: Color(0xFFF97316),
             ),
           ),
         ),
         items: [
           const DropdownMenuItem(
-            value:
-                'All Employees',
-            child: Text(
-              'All Employees',
-            ),
+            value: 'all',
+            child: Text('All Employees'),
           ),
-          ...employeeNames.map(
-            (employee) {
+          ...employeeOptions.map(
+            (option) {
               return DropdownMenuItem(
-                value: employee,
+                value: option.key,
                 child: Text(
-                  employee,
+                  option.value,
                   overflow:
-                      TextOverflow
-                          .ellipsis,
+                      TextOverflow.ellipsis,
                 ),
               );
             },
@@ -865,8 +952,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
           }
 
           setState(() {
-            selectedEmployee =
-                value;
+            selectedEmployeeId = value;
             _expandedHours.clear();
           });
         },
@@ -980,15 +1066,11 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
     _HourActivityGroup group,
   ) {
     final expanded =
-        isHourExpanded(
-      group.hourStart,
-    );
+        isHourExpanded(group);
 
     return InkWell(
       onTap: () {
-        toggleHour(
-          group.hourStart,
-        );
+        toggleHour(group);
       },
       child: Container(
         height: 68,
@@ -1047,7 +1129,8 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
             const SizedBox(width: 28),
 
             Text(
-              '(${group.slots.length} intervals)',
+              '(${group.slots.length} '
+              '${group.slots.length == 1 ? 'interval' : 'intervals'})',
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight:
@@ -1303,7 +1386,9 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
           Expanded(
             flex: 2,
             child: Text(
-              '${slot.keyboard}',
+              slot.hasSample
+                  ? '${slot.keyboard}'
+                  : '—',
               textAlign:
                   TextAlign.right,
               style: const TextStyle(
@@ -1320,7 +1405,9 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
           Expanded(
             flex: 2,
             child: Text(
-              '${slot.mouse}',
+              slot.hasSample
+                  ? '${slot.mouse}'
+                  : '—',
               textAlign:
                   TextAlign.right,
               style: const TextStyle(
@@ -1346,9 +1433,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
     _HourActivityGroup group,
   ) {
     final expanded =
-        isHourExpanded(
-      group.hourStart,
-    );
+        isHourExpanded(group);
 
     return Container(
       margin:
@@ -1383,6 +1468,101 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
     );
   }
 
+  Widget buildEmployeeActivityCard(
+    _EmployeeActivityGroup employeeGroup,
+  ) {
+    final keyboardTotal = employeeGroup.hours.fold<int>(
+      0,
+      (total, hour) => total + hour.keyboardTotal,
+    );
+
+    final mouseTotal = employeeGroup.hours.fold<int>(
+      0,
+      (total, hour) => total + hour.mouseTotal,
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFE2E8F0),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 14,
+            ),
+            color: const Color(0xFFFFF7ED),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.person_outline_rounded,
+                  color: Color(0xFFF97316),
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    employeeGroup.employeeName,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.keyboard_rounded,
+                  size: 16,
+                  color: Color(0xFF64748B),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$keyboardTotal',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(width: 18),
+                const Icon(
+                  Icons.mouse_rounded,
+                  size: 16,
+                  color: Color(0xFF64748B),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$mouseTotal',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              children: employeeGroup.hours
+                  .map(buildHourCard)
+                  .toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ============================================================
   // BUILD
   // ============================================================
@@ -1391,8 +1571,8 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
   Widget build(
     BuildContext context,
   ) {
-    final groups =
-        groupedActivities;
+    final employeeGroups =
+        employeeActivityGroups;
 
     return Scaffold(
       backgroundColor:
@@ -1494,7 +1674,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
                       child:
                           CircularProgressIndicator(),
                     )
-                  : groups.isEmpty
+                  : employeeGroups.isEmpty
                       ? Center(
                           child: Text(
                             selectedDayIndex ==
@@ -1509,20 +1689,19 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
                               ),
                             ),
                           ),
-                        )
-                      : ListView.builder(
-                          itemCount:
-                              groups.length,
-                          itemBuilder:
-                              (
-                            context,
-                            index,
-                          ) {
-                            return buildHourCard(
-                              groups[index],
-                            );
-                          },
-                        ),
+                        )                       : ListView.builder(
+                           itemCount:
+                               employeeGroups.length,
+                           itemBuilder:
+                               (
+                             context,
+                             index,
+                           ) {
+                             return buildEmployeeActivityCard(
+                               employeeGroups[index],
+                             );
+                           },
+                         ),
             ),
           ],
         ),
@@ -1542,6 +1721,7 @@ class _ActivitySlot {
 
   int keyboard;
   int mouse;
+  final bool hasSample;
 
   _ActivitySlot({
     required this.slotStart,
@@ -1549,6 +1729,7 @@ class _ActivitySlot {
     required this.employeeId,
     required this.keyboard,
     required this.mouse,
+    required this.hasSample,
   });
 }
 
@@ -1557,15 +1738,31 @@ class _ActivitySlot {
 // ============================================================
 
 class _HourActivityGroup {
+  final String employeeId;
+  final String employeeName;
   final DateTime hourStart;
   final List<_ActivitySlot> slots;
   final int keyboardTotal;
   final int mouseTotal;
 
   const _HourActivityGroup({
+    required this.employeeId,
+    required this.employeeName,
     required this.hourStart,
     required this.slots,
     required this.keyboardTotal,
     required this.mouseTotal,
+  });
+}
+
+class _EmployeeActivityGroup {
+  final String employeeId;
+  final String employeeName;
+  final List<_HourActivityGroup> hours;
+
+  const _EmployeeActivityGroup({
+    required this.employeeId,
+    required this.employeeName,
+    required this.hours,
   });
 }

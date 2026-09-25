@@ -13,11 +13,12 @@ import 'screens/splash_screen.dart';
 import 'services/session_timeout_service.dart';
 import 'services/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'screens/master_admin/master_admin_dashboard.dart';
 
 final supabase = Supabase.instance.client;
 Uri? startupDeepLink;
 
-const String appVersion = '1.0.5';
+const String appVersion = '1.0.7';
 
 String currentUserId = '';
 String currentUserName = '';
@@ -31,6 +32,12 @@ final ValueNotifier<String> currentWorkspaceNameNotifier =
     ValueNotifier<String>('');
 
 ValueNotifier<bool> isDarkMode = ValueNotifier(false);
+
+// Web is available for every approved/active ClockMetric role.
+// Automatic screenshots and keyboard/activity monitoring remain desktop-only.
+bool get desktopTrackingAvailable => !kIsWeb;
+bool get clockMetricWeb => kIsWeb;
+
 
 class _UpdateDownloadDialog extends StatefulWidget {
   final AppUpdateInfo update;
@@ -155,8 +162,8 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url: 'https://zakvowocgunowgxxslqm.supabase.co',
-    anonKey: 'sb_publishable_CPIzdsRFAy_8hPYucVkcTA_T-FJyGoA',
+    url: 'https://kuvociuqxvgumcdbmupc.supabase.co',
+    anonKey: 'sb_publishable_4Cin-x54MAazQpc67UUwqQ_rO4eK2gw',
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.implicit,
     ),
@@ -222,6 +229,7 @@ class _AuthGateState extends State<AuthGate> {
   bool resetScreenOpen = false;
   bool invitationScreenOpen = false;
   bool passwordRecoveryActive = false;
+  bool invitationLinkActive = false;
 
   StreamSubscription<AuthState>? authSubscription;
   late final AppLinks appLinks;
@@ -234,6 +242,105 @@ class _AuthGateState extends State<AuthGate> {
 
 static const Duration _maxNotOpenedDuration =
     Duration(days: 30);
+
+  Map<String, String> _authParametersFromUri(Uri uri) {
+    final parameters = <String, String>{};
+
+    parameters.addAll(uri.queryParameters);
+
+    final fragment = uri.fragment.trim();
+
+    if (fragment.isNotEmpty) {
+      try {
+        final cleanFragment =
+            fragment.startsWith('?')
+                ? fragment.substring(1)
+                : fragment;
+
+        parameters.addAll(
+          Uri.splitQueryString(cleanFragment),
+        );
+      } catch (error) {
+        debugPrint(
+          'Unable to parse authentication fragment: $error',
+        );
+      }
+    }
+
+    return parameters;
+  }
+
+  bool _isInvitationUri(Uri uri) {
+    final parameters =
+        _authParametersFromUri(uri);
+
+    final type =
+        parameters['type']
+                ?.trim()
+                .toLowerCase() ??
+            '';
+
+    final routeText =
+        '${uri.host}${uri.path}'
+            .toLowerCase();
+
+    return type == 'invite' ||
+        type == 'signup' ||
+        routeText.contains('invite');
+  }
+
+  Future<void> _processAuthenticationUri(
+    Uri uri,
+  ) async {
+    if (_isInvitationUri(uri)) {
+      invitationLinkActive = true;
+    }
+
+    try {
+      await supabase.auth.getSessionFromUrl(
+        uri,
+      );
+
+      if (supabase.auth.currentUser != null) {
+        debugPrint(
+          'Authentication link session restored.',
+        );
+        return;
+      }
+    } catch (error) {
+      debugPrint(
+        'Session URL processing result: $error',
+      );
+    }
+
+    final parameters =
+        _authParametersFromUri(uri);
+
+    final refreshToken =
+        parameters['refresh_token']
+                ?.trim() ??
+            '';
+
+    if (refreshToken.isEmpty) {
+      return;
+    }
+
+    try {
+      await supabase.auth.setSession(
+        refreshToken,
+      );
+
+      debugPrint(
+        'Authentication session restored '
+        'from refresh token.',
+      );
+    } catch (error) {
+      debugPrint(
+        'Refresh-token session restore '
+        'failed: $error',
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -260,11 +367,9 @@ static const Duration _maxNotOpenedDuration =
     }
 
     if (initialUri != null) {
-      try {
-        await supabase.auth.getSessionFromUrl(initialUri);
-      } catch (error) {
-        debugPrint('Session URL processing result: $error');
-      }
+      await _processAuthenticationUri(
+        initialUri,
+      );
     }
 
     if (!mounted) return;
@@ -282,13 +387,17 @@ static const Duration _maxNotOpenedDuration =
         if (uri.scheme != 'timetracker') return;
 
         try {
-          await supabase.auth.getSessionFromUrl(uri);
+          await _processAuthenticationUri(
+            uri,
+          );
 
           if (!mounted) return;
 
           await checkSession();
         } catch (error) {
-          debugPrint('Deep-link authentication error: $error');
+          debugPrint(
+            'Deep-link authentication error: $error',
+          );
         }
       },
       onError: (Object error) {
@@ -349,6 +458,7 @@ static const Duration _maxNotOpenedDuration =
             loading = false;
             resetScreenOpen = false;
             invitationScreenOpen = false;
+            invitationLinkActive = false;
           });
         }
       },
@@ -445,6 +555,8 @@ static const Duration _maxNotOpenedDuration =
         invitationScreenOpen = false;
 
         if (completed == true && mounted) {
+          invitationLinkActive = false;
+
           try {
             await supabase.auth.refreshSession();
           } catch (error) {
@@ -563,6 +675,21 @@ Future<bool> _checkThirtyDayLoginRule() async {
       });
       return;
     }
+    if (invitationLinkActive) {
+      SessionTimeoutService.instance.stop();
+      _clearCurrentUser();
+
+      if (!mounted) return;
+
+      setState(() {
+        loggedIn = false;
+        loading = false;
+      });
+
+      _openInvitationScreen();
+      return;
+    }
+
     final sessionStillValid =
     await _checkThirtyDayLoginRule();
 
@@ -660,45 +787,12 @@ if (!sessionStillValid) {
           profileRole.isNotEmpty ? profileRole : 'employee';
 
       // ======================================================
-// WEB VERSION IS FOR ADMIN ONLY
-// This does NOT affect the Windows application.
-// ======================================================
-
-if (kIsWeb && resolvedRole != 'admin') {
-  try {
-    await supabase.auth.signOut();
-  } catch (error) {
-    debugPrint(
-      'Web non-admin sign-out error: $error',
-    );
-  }
-
-  _clearCurrentUser();
-
-  if (!mounted) return;
-
-  setState(() {
-    loggedIn = false;
-    loading = false;
-  });
-
-  WidgetsBinding.instance.addPostFrameCallback(
-    (_) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Web access is available to administrators only.',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-    },
-  );
-
-  return;
-}
+      // WEB ACCESS
+      // Employee, admin and master_admin can all use ClockMetric Web.
+      // Screenshot capture and keyboard/activity tracking should remain
+      // desktop-only and be guarded in the relevant tracking services/screens
+      // with `desktopTrackingAvailable`.
+      // ======================================================
 
       final approvalStatus =
           profile['approval_status']
@@ -760,6 +854,32 @@ if (kIsWeb && resolvedRole != 'admin') {
 
       currentUserRole = resolvedRole;
 
+      // Master Admin manages the whole ClockMetric platform and does not
+      // belong to a single workspace.
+      if (resolvedRole == 'master_admin') {
+        currentWorkspaceId = '';
+        currentWorkspaceName = '';
+        currentWorkspaceNameNotifier.value = '';
+        workspaceTrialExpired = false;
+        workspaceSubscriptionBlocked = false;
+
+        if (!mounted) return;
+
+        setState(() {
+          loggedIn = true;
+          loading = false;
+        });
+
+        _startSessionTimeout();
+
+        // Do not run the Windows app updater on web.
+        if (!kIsWeb) {
+          _checkForAppUpdate();
+        }
+
+        return;
+      }
+
       currentWorkspaceId =
           profile['workspace_id']?.toString().trim() ?? '';
 
@@ -772,7 +892,8 @@ if (kIsWeb && resolvedRole != 'admin') {
       final workspace = await supabase
           .from('workspaces')
           .select(
-  'workspace_name, subscription_status, trial_ends_at, current_period_end',
+  'workspace_name, subscription_status, trial_ends_at, '
+  'current_period_end, is_active',
 )
           .eq('id', currentWorkspaceId)
           .maybeSingle();
@@ -782,6 +903,46 @@ if (kIsWeb && resolvedRole != 'admin') {
           'The user workspace could not be found.',
         );
       }
+
+      final workspaceIsActive =
+    workspace['is_active'] != false;
+
+if (!workspaceIsActive) {
+  try {
+    await supabase.auth.signOut();
+  } catch (error) {
+    debugPrint(
+      'Disabled workspace sign-out error: $error',
+    );
+  }
+
+  _clearCurrentUser();
+
+  if (!mounted) return;
+
+  setState(() {
+    loggedIn = false;
+    loading = false;
+  });
+
+  WidgetsBinding.instance.addPostFrameCallback(
+    (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This workspace has been disabled. '
+            'Please contact ClockMetric support.',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+    },
+  );
+
+  return;
+}
 
       final workspaceStatus =
     workspace['subscription_status']
@@ -985,7 +1146,9 @@ Future<void> _showUpdateDownloadDialog(
         ),
       );
     } else if (loggedIn) {
-  if (workspaceSubscriptionBlocked && currentUserRole != 'admin') {
+  if (workspaceSubscriptionBlocked &&
+      currentUserRole != 'admin' &&
+      currentUserRole != 'master_admin') {
   screen = Scaffold(
     backgroundColor: const Color(0xFFF8FAFC),
     body: Center(
@@ -1043,7 +1206,11 @@ Future<void> _showUpdateDownloadDialog(
     ),
   );
 } else {
-    screen = const DashboardV2Screen();
+    if (currentUserRole == 'master_admin') {
+  screen = const MasterAdminDashboard();
+} else {
+  screen = const DashboardV2Screen();
+}
   }
 } else {
   screen = const LoginScreen();

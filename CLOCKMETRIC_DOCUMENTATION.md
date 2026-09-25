@@ -258,3 +258,6 @@ Whenever an important feature or business rule changes, update this document.
 Do not rely only on verbal explanations.
 
 A new developer should read this document before making major changes to ClockMetric.
+
+
+OCR

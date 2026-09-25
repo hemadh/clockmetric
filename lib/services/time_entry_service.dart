@@ -4,7 +4,7 @@ import 'keyboard_sample_scheduler_service.dart';
 
 class TimeEntryService {
   Future<Map<String, dynamic>?> getRunningEntry() async {
-    return await supabase
+    final rows = await supabase
         .from('time_entries')
         .select(
           'id, project_id, start_time, last_heartbeat_at, '
@@ -13,13 +13,26 @@ class TimeEntryService {
         .eq('employee_id', currentUserId)
         .eq('workspace_id', currentWorkspaceId)
         .filter('end_time', 'is', null)
-        .maybeSingle();
+        .order(
+          'start_time',
+          ascending: false,
+        )
+        .limit(1);
+
+    if (rows.isEmpty) {
+      return null;
+    }
+
+    return Map<String, dynamic>.from(
+      rows.first,
+    );
   }
 
   Future<String> startTimeEntry({
     required String projectId,
   }) async {
-    final now = DateTime.now();
+    // Always store database timestamps in UTC.
+    final now = DateTime.now().toUtc();
 
     final response = await supabase
         .from('time_entries')
@@ -29,7 +42,8 @@ class TimeEntryService {
           'employee_name': currentUserName,
           'workspace_id': currentWorkspaceId,
           'start_time': now.toIso8601String(),
-          'last_heartbeat_at': now.toIso8601String(),
+          'last_heartbeat_at':
+              now.toIso8601String(),
           'end_time': null,
           'duration_minutes': null,
           'note': null,
@@ -37,7 +51,8 @@ class TimeEntryService {
         .select('id')
         .single();
 
-    final entryId = response['id'].toString();
+    final entryId =
+        response['id'].toString();
 
     await KeyboardSampleSchedulerService.start(
       timeEntryId: entryId,
@@ -59,16 +74,25 @@ class TimeEntryService {
       return;
     }
 
+    final now = DateTime.now().toUtc();
+
     await supabase
         .from('time_entries')
         .update({
           'last_heartbeat_at':
-              DateTime.now().toIso8601String(),
+              now.toIso8601String(),
         })
         .eq('id', entryId)
         .eq('employee_id', currentUserId)
-        .eq('workspace_id', currentWorkspaceId)
-        .filter('end_time', 'is', null);
+        .eq(
+          'workspace_id',
+          currentWorkspaceId,
+        )
+        .filter(
+          'end_time',
+          'is',
+          null,
+        );
   }
 
   Future<void> stopTimeEntry({
@@ -76,21 +100,49 @@ class TimeEntryService {
     required DateTime startTime,
     required String note,
   }) async {
-    final endTime =
+    // Scheduler may return local time.
+    // Convert it to UTC before saving.
+    final schedulerEndTime =
         await KeyboardSampleSchedulerService.stop();
 
-    final durationMinutes =
-        endTime.difference(startTime).inMinutes;
+    final endTime =
+        schedulerEndTime.toUtc();
 
-    debugPrint('========== STOP TIMER ==========');
-    debugPrint('Entry ID: $entryId');
-    debugPrint('Employee ID: $currentUserId');
-    debugPrint('Workspace ID: $currentWorkspaceId');
+    // Normalize start time as well.
+    final normalizedStartTime =
+        startTime.toUtc();
+
+    final durationMinutes =
+        endTime
+            .difference(normalizedStartTime)
+            .inMinutes;
+
+    debugPrint(
+      '========== STOP TIMER ==========',
+    );
+    debugPrint(
+      'Entry ID: $entryId',
+    );
+    debugPrint(
+      'Employee ID: $currentUserId',
+    );
+    debugPrint(
+      'Workspace ID: $currentWorkspaceId',
+    );
+    debugPrint(
+      'Start UTC: '
+      '${normalizedStartTime.toIso8601String()}',
+    );
+    debugPrint(
+      'End UTC: '
+      '${endTime.toIso8601String()}',
+    );
 
     final result = await supabase
         .from('time_entries')
         .update({
-          'end_time': endTime.toIso8601String(),
+          'end_time':
+              endTime.toIso8601String(),
           'last_heartbeat_at':
               endTime.toIso8601String(),
           'duration_minutes':
@@ -104,13 +156,24 @@ class TimeEntryService {
         })
         .eq('id', entryId)
         .eq('employee_id', currentUserId)
-        .eq('workspace_id', currentWorkspaceId)
-        .filter('end_time', 'is', null)
+        .eq(
+          'workspace_id',
+          currentWorkspaceId,
+        )
+        .filter(
+          'end_time',
+          'is',
+          null,
+        )
         .select();
 
     debugPrint('Rows updated:');
-    debugPrint(result.toString());
-    debugPrint('===============================');
+    debugPrint(
+      result.toString(),
+    );
+    debugPrint(
+      '===============================',
+    );
   }
 
   Future<void> stopRunningEntrySilently({
@@ -136,15 +199,24 @@ class TimeEntryService {
     }
 
     final isAdmin =
-        currentUserRole.trim().toLowerCase() ==
+        currentUserRole
+                .trim()
+                .toLowerCase() ==
             'admin';
 
     var query = supabase
         .from('time_entries')
         .delete()
         .eq('id', entryId)
-        .eq('workspace_id', currentWorkspaceId)
-        .not('end_time', 'is', null);
+        .eq(
+          'workspace_id',
+          currentWorkspaceId,
+        )
+        .not(
+          'end_time',
+          'is',
+          null,
+        );
 
     if (!isAdmin) {
       query = query.eq(

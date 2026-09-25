@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
@@ -26,6 +28,7 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
   String? errorMessage;
   String? teamTimeErrorMessage;
   String? selectedEmployeeName;
+  String? selectedEmployeeId;
 
   int weekOffset = 0;
 
@@ -33,10 +36,36 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
   List<Map<String, dynamic>> entries = [];
   List<EmployeeWeeklyTime> weeklyTeamTimes = [];
 
+  final Map<String, String> employeeIdsByName = {};
+  Timer? _liveRefreshTimer;
+
   @override
   void initState() {
     super.initState();
     initializeScreen();
+
+    // Keep a running entry live on the Timesheet instead of freezing
+    // at the value from the last page load/refresh.
+    _liveRefreshTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) {
+        if (!mounted || loading || weekOffset != 0) return;
+
+        final hasRunningEntry = entries.any(
+          (entry) => entry['end_time'] == null,
+        );
+
+        if (hasRunningEntry) {
+          setState(() {});
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _liveRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> initializeScreen() async {
@@ -46,6 +75,10 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       selectedEmployeeName = widget.employeeName.trim().isNotEmpty
           ? widget.employeeName.trim()
           : currentUserName;
+
+      // IMPORTANT: the employee ID is the permanent identity.
+      // Names can be edited, but this ID must never change.
+      selectedEmployeeId = currentUserId.trim();
     }
 
     await loadTimesheet();
@@ -94,20 +127,26 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
     try {
       final response = await supabase
           .from('profiles')
-          .select('full_name')
+          .select('id, full_name')
           .eq('workspace_id', currentWorkspaceId)
           .eq('approval_status', 'approved')
           .order('full_name');
 
       final loadedEmployees = <String>[];
+      final loadedEmployeeIdsByName = <String, String>{};
 
       for (final profile in response) {
         final name = profile['full_name']?.toString().trim();
+        final id = profile['id']?.toString().trim() ?? '';
 
         if (name != null &&
             name.isNotEmpty &&
             !loadedEmployees.contains(name)) {
           loadedEmployees.add(name);
+
+          if (id.isNotEmpty) {
+            loadedEmployeeIdsByName[name] = id;
+          }
         }
       }
 
@@ -124,11 +163,19 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
         initialEmployee = loadedEmployees.first;
       }
 
+      final initialEmployeeId = initialEmployee == null
+          ? null
+          : loadedEmployeeIdsByName[initialEmployee];
+
       if (!mounted) return;
 
       setState(() {
         employees = loadedEmployees;
+        employeeIdsByName
+          ..clear()
+          ..addAll(loadedEmployeeIdsByName);
         selectedEmployeeName = initialEmployee;
+        selectedEmployeeId = initialEmployeeId;
         loadingEmployees = false;
       });
     } catch (error) {
@@ -145,15 +192,18 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
   Future<void> loadTimesheet() async {
     if (!mounted) return;
 
-    final employeeName = selectedEmployeeName?.trim();
+    // IMPORTANT: always load time by employee_id, never by employee_name.
+    // A person's display name can change at any time without affecting
+    // their historical time entries.
+    final employeeId = widget.isManager
+        ? (selectedEmployeeId ?? '').trim()
+        : currentUserId.trim();
 
-    if (employeeName == null || employeeName.isEmpty) {
+    if (employeeId.isEmpty) {
       setState(() {
         loading = false;
         entries = [];
-        errorMessage = widget.isManager
-            ? 'No approved employees were found.'
-            : 'Unable to identify the current employee.';
+        errorMessage = 'Unable to identify the selected employee.';
       });
 
       return;
@@ -171,11 +221,12 @@ class _TimesheetScreenState extends State<TimesheetScreen> {
       final response = await supabase
           .from('time_entries')
           .select(
-            'id, employee_name, project_id, start_time, end_time, '
-            'duration_minutes, note, projects(project_name)',
+            'id, employee_id, employee_name, project_id, '
+            'start_time, end_time, duration_minutes, note, '
+            'projects(project_name)',
           )
           .eq('workspace_id', currentWorkspaceId)
-          .eq('employee_name', employeeName)
+          .eq('employee_id', employeeId)
           .gte(
             'start_time',
             weekStart.toIso8601String(),
@@ -336,6 +387,26 @@ Future<void> loadWeeklyTeamTime() async {
     }
 
     return getProjectName(entry);
+  }
+
+  String projectDisplayName(dynamic value) {
+    var name = value?.toString().trim() ?? '';
+
+    if (name.isEmpty ||
+        name.toLowerCase() == 'no project' ||
+        name.toLowerCase() == 'unknown project') {
+      return 'Project: No Project';
+    }
+
+    name = name.replaceFirst(
+      RegExp(
+        r'^project\s*:\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    return 'Project: ${name.trim()}';
   }
 
   String getProjectName(Map<String, dynamic> entry) {
@@ -596,7 +667,7 @@ Future<void> loadWeeklyTeamTime() async {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      projectName,
+                      projectDisplayName(projectName),
                       style: const TextStyle(
                         color: AppColors.textPrimary,
                         fontSize: 19,
@@ -976,81 +1047,130 @@ Future<void> loadWeeklyTeamTime() async {
     );
   }
 
-  Widget buildEmployeeSelector() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 6,
+Widget buildEmployeeSelector() {
+  return Container(
+    padding: const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 6,
+    ),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: AppColors.border,
       ),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.border,
+    ),
+    child: Row(
+      children: [
+        const Icon(
+          Icons.person_outline,
+          color: AppColors.primary,
         ),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.person_outline,
-            color: AppColors.primary,
+
+        const SizedBox(width: 12),
+
+        const Text(
+          'Employee',
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.bold,
           ),
-          const SizedBox(width: 12),
-          const Text(
-            'Employee',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.bold,
+        ),
+
+        const SizedBox(width: 18),
+
+        if (loadingEmployees)
+          const SizedBox(
+            width: 150,
+            child: LinearProgressIndicator(
+              color: AppColors.primary,
+            ),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 3,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.primarySurface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppColors.primary,
+                width: 1.5,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: employees.contains(
+                  selectedEmployeeName,
+                )
+                    ? selectedEmployeeName
+                    : null,
+
+                isExpanded: false,
+
+                dropdownColor: AppColors.surface,
+
+                icon: const Padding(
+                  padding: EdgeInsets.only(left: 6),
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
+                ),
+
+                hint: const Text(
+                  'Select employee',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                  ),
+                ),
+
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+
+                items: employees
+                    .map(
+                      (employee) =>
+                          DropdownMenuItem<String>(
+                        value: employee,
+                        child: Text(
+                          employee,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+
+                onChanged: (employee) {
+                  if (employee == null ||
+                      employee ==
+                          selectedEmployeeName) {
+                    return;
+                  }
+
+                  setState(() {
+                    selectedEmployeeName = employee;
+                    selectedEmployeeId =
+                        employeeIdsByName[employee];
+                  });
+
+                  loadTimesheet();
+                },
+              ),
             ),
           ),
-          const SizedBox(width: 18),
-          Expanded(
-            child: loadingEmployees
-                ? const LinearProgressIndicator(
-                    color: AppColors.primary,
-                  )
-                : DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: employees.contains(
-                        selectedEmployeeName,
-                      )
-                          ? selectedEmployeeName
-                          : null,
-                      isExpanded: true,
-                      hint: const Text(
-                        'Select employee',
-                      ),
-                      items: employees
-                          .map(
-                            (employee) =>
-                                DropdownMenuItem<String>(
-                              value: employee,
-                              child: Text(employee),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (employee) {
-                        if (employee == null ||
-                            employee ==
-                                selectedEmployeeName) {
-                          return;
-                        }
+      ],
+    ),
+  );
+}
 
-                        setState(() {
-                          selectedEmployeeName = employee;
-                        });
-
-                        loadTimesheet();
-                      },
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget buildReadOnlyNotice() {
+Widget buildReadOnlyNotice() {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: 14,
@@ -1189,7 +1309,9 @@ Future<void> loadWeeklyTeamTime() async {
                             const SizedBox(width: 9),
                             Expanded(
                               child: Text(
-                                projectRow.projectName,
+                                projectDisplayName(
+                                  projectRow.projectName,
+                                ),
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: AppColors.textPrimary,

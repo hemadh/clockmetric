@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -71,64 +72,144 @@ static const textMuted = Color(0xFF9CA3AF);
     super.dispose();
   }
 
-  Future<void> loadEmployees() async {
-    if (!mounted) return;
+  static const Duration _pendingInvitationLifetime =
+      Duration(hours: 48);
 
-    setState(() {
-      loading = true;
-      errorMessage = null;
-    });
+  DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+
+    return DateTime.tryParse(value.toString())?.toUtc();
+  }
+
+  bool _isExpiredInvitation(
+    Map<String, dynamic> invitation,
+  ) {
+    final createdAt =
+        _parseDate(invitation['created_at']);
+
+    if (createdAt == null) {
+      return false;
+    }
+
+    final expiresAt =
+        createdAt.add(_pendingInvitationLifetime);
+
+    return !DateTime.now()
+        .toUtc()
+        .isBefore(expiresAt);
+  }
+
+  Future<void> _deleteExpiredInvitations() async {
+    final cutoff = DateTime.now()
+        .toUtc()
+        .subtract(_pendingInvitationLifetime)
+        .toIso8601String();
 
     try {
-      final profilesResponse = await supabase
-          .from('profiles')
-          .select(
-            'id, full_name, email, role, required_weekly_hours, '
-            'approval_status, is_active, created_at',
+      await supabase
+          .from('pending_employees')
+          .delete()
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
           )
-          .eq('workspace_id', currentWorkspaceId)
-          .order('full_name');
-
-      final allProfiles =
-          List<Map<String, dynamic>>.from(
-        profilesResponse,
-      );
-
-      final approved = allProfiles.where((employee) {
-        return employee['approval_status']
-                ?.toString()
-                .toLowerCase() ==
-            'approved';
-      }).toList();
-
-      final pending = allProfiles.where((employee) {
-        return employee['approval_status']
-                ?.toString()
-                .toLowerCase() ==
-            'pending';
-      }).toList();
-
-      await _loadStatistics();
-
-      if (!mounted) return;
-
-      setState(() {
-        employees = approved;
-        pendingApprovals = pending;
-        loading = false;
-      });
+          .eq('status', 'invited')
+          .lt('created_at', cutoff);
     } catch (error) {
-      debugPrint('Employee loading error: $error');
-
-      if (!mounted) return;
-
-      setState(() {
-        loading = false;
-        errorMessage = 'Unable to load employees.';
-      });
+      // Do not block the Employee page if the database
+      // delete is temporarily unavailable. Expired
+      // invitations are also filtered from the UI below.
+      debugPrint(
+        'Expired invitation cleanup error: $error',
+      );
     }
   }
 
+Future<void> loadEmployees() async {
+  if (!mounted) return;
+
+  setState(() {
+    loading = true;
+    errorMessage = null;
+  });
+
+  try {
+    await _deleteExpiredInvitations();
+
+    final profilesResponse = await supabase
+        .from('profiles')
+        .select(
+          'id, full_name, email, role, required_weekly_hours, '
+          'approval_status, is_active, created_at',
+        )
+        .eq('workspace_id', currentWorkspaceId)
+        .order('full_name');
+
+    final pendingResponse = await supabase
+        .from('pending_employees')
+        .select(
+          'id, full_name, email, role, required_weekly_hours, '
+          'status, created_at',
+        )
+        .eq('workspace_id', currentWorkspaceId)
+        .eq('status', 'invited')
+        .order('full_name');
+
+    final allProfiles =
+        List<Map<String, dynamic>>.from(
+      profilesResponse,
+    );
+
+    final approved = allProfiles.where((employee) {
+      return employee['approval_status']
+              ?.toString()
+              .toLowerCase() ==
+          'approved';
+    }).toList();
+
+    final pendingFromProfiles =
+        allProfiles.where((employee) {
+      return employee['approval_status']
+              ?.toString()
+              .toLowerCase() ==
+          'pending';
+    }).toList();
+
+    final pendingInvites =
+        List<Map<String, dynamic>>.from(
+      pendingResponse,
+    ).where((invitation) {
+      // Fail-safe: even if deletion is blocked by RLS
+      // or temporarily fails, an invitation older than
+      // 48 hours must not remain visible.
+      return !_isExpiredInvitation(invitation);
+    }).toList();
+
+    await _loadStatistics();
+
+    if (!mounted) return;
+
+    setState(() {
+      employees = approved;
+
+      pendingApprovals = [
+        ...pendingFromProfiles,
+        ...pendingInvites,
+      ];
+
+      loading = false;
+    });
+  } catch (error) {
+    debugPrint('Employee loading error: $error');
+
+    if (!mounted) return;
+
+    setState(() {
+      loading = false;
+      errorMessage = 'Unable to load employees.';
+    });
+  }
+}
   Future<void> _loadStatistics() async {
     weeklyMinutes.clear();
     screenshotsToday.clear();
@@ -246,7 +327,7 @@ static const textMuted = Color(0xFF9CA3AF);
         TextEditingController();
 
     final hoursController =
-        TextEditingController(text: '45');
+        TextEditingController();
 
     String role = 'employee';
     bool saving = false;
@@ -319,7 +400,9 @@ static const textMuted = Color(0xFF9CA3AF);
                         .from(
                           'pending_employees',
                         )
-                        .select('id')
+                        .select(
+                          'id, status, created_at',
+                        )
                         .eq(
                           'workspace_id',
                           currentWorkspaceId,
@@ -328,19 +411,48 @@ static const textMuted = Color(0xFF9CA3AF);
                         .maybeSingle();
 
                 if (existingPending != null) {
-                  throw Exception(
-                    'This employee is already pending registration.',
+                  final pendingMap =
+                      Map<String, dynamic>.from(
+                    existingPending,
                   );
+
+                  if (_isExpiredInvitation(
+                    pendingMap,
+                  )) {
+                    // An old invitation must not block
+                    // sending a fresh invitation.
+                    await supabase
+                        .from(
+                          'pending_employees',
+                        )
+                        .delete()
+                        .eq(
+                          'id',
+                          pendingMap['id'],
+                        )
+                        .eq(
+                          'workspace_id',
+                          currentWorkspaceId,
+                        );
+                  } else {
+                    throw Exception(
+                      'This employee is already pending registration.',
+                    );
+                  }
                 }
 
                 final response = await supabase.functions.invoke(
   'invite-workspace-member',
-  body: {
-    'full_name': name,
-    'email': email,
-    'role': role,
-    'workspace_id': currentWorkspaceId,
-  },
+ body: {
+  'full_name': name,
+  'email': email,
+  'role': role,
+  'workspace_id': currentWorkspaceId,
+  'required_weekly_hours': hours,
+  'redirect_to': kIsWeb
+    ? 'https://clockmetric-app.netlify.app'
+    : 'timetracker://invite',
+},
 );
 
 final data = response.data;
@@ -597,16 +709,19 @@ if (data is Map && data['error'] != null) {
 
     await _runAction(
       () async {
-        await supabase
-            .from('profiles')
-            .update({
-              'is_active': newStatus,
-            })
-            .eq('id', id)
-            .eq(
-              'workspace_id',
-              currentWorkspaceId,
-            );
+        final result = await supabase.rpc(
+          'admin_set_employee_active',
+          params: {
+            'p_employee_id': id,
+            'p_is_active': newStatus,
+          },
+        );
+
+        if (result != true) {
+          throw Exception(
+            'Employee status could not be updated.',
+          );
+        }
       },
       newStatus
           ? '$name was enabled.'
@@ -673,12 +788,12 @@ if (data is Map && data['error'] != null) {
     );
 
     final hoursController =
-        TextEditingController(
-      text:
-          (employee['required_weekly_hours'] ??
-                  45)
-              .toString(),
-    );
+    TextEditingController(
+  text:
+      employee['required_weekly_hours']
+          ?.toString() ??
+      '',
+);
 
     String role =
         employee['role']?.toString() ??
@@ -791,6 +906,7 @@ if (data is Map && data['error'] != null) {
               ),
               content: SizedBox(
                 width: 420,
+
                 child: Column(
                   mainAxisSize:
                       MainAxisSize.min,
@@ -917,7 +1033,7 @@ if (data is Map && data['error'] != null) {
                   ?.toString() ??
               '',
         ) ??
-        45;
+        0;
 
     final thisWeek =
         weeklyMinutes[id] ?? 0;
@@ -1226,7 +1342,7 @@ if (data is Map && data['error'] != null) {
             final requiredHours = int.tryParse(
                   employee['required_weekly_hours']?.toString() ?? '',
                 ) ??
-                45;
+                0;
 
             return Container(
               height: 54,
@@ -1705,93 +1821,117 @@ String _formatClockDuration(int minutes) {
 }
 
   Widget _pendingCard(
-    Map<String, dynamic> employee,
-  ) {
-    return Container(
-      margin:
-          const EdgeInsets.only(bottom: 8),
-      padding:
-          const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius:
-            BorderRadius.circular(13),
-        border: Border.all(
-          color: border,
-        ),
+  Map<String, dynamic> employee,
+) {
+  final status =
+      employee['status']
+          ?.toString()
+          .toLowerCase();
+
+  final isInvitation = status == 'invited';
+
+  return Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: surface,
+      borderRadius: BorderRadius.circular(13),
+      border: Border.all(
+        color: border,
       ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            backgroundColor: warning,
-            child: Icon(
-              Icons.hourglass_top,
-              color: Colors.white,
-            ),
+    ),
+    child: Row(
+      children: [
+        CircleAvatar(
+          backgroundColor:
+              isInvitation ? warning : primary,
+          child: Icon(
+            isInvitation
+                ? Icons.mark_email_unread_outlined
+                : Icons.hourglass_top,
+            color: Colors.white,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Text(
-                  employee['full_name']
-                          ?.toString() ??
-                      'Employee',
-                  style: const TextStyle(
-                    color: textPrimary,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
+        ),
+
+        const SizedBox(width: 10),
+
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              Text(
+                employee['full_name']
+                        ?.toString() ??
+                    'Employee',
+                style: const TextStyle(
+                  color: textPrimary,
+                  fontWeight: FontWeight.bold,
                 ),
-                Text(
-                  employee['email']
-                          ?.toString() ??
-                      '',
-                  style: const TextStyle(
-                    color: textSecondary,
+              ),
+
+              const SizedBox(height: 2),
+
+              Text(
+                employee['email']
+                        ?.toString() ??
+                    '',
+                style: const TextStyle(
+                  color: textSecondary,
+                ),
+              ),
+
+              if (isInvitation) ...[
+                const SizedBox(height: 4),
+                const Text(
+                  'Invitation sent — waiting for employee to accept.',
+                  style: TextStyle(
+                    color: warning,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
-            ),
+            ],
           ),
+        ),
+
+        if (isInvitation)
+          _badge(
+            'Invitation Pending',
+            warning,
+          )
+        else ...[
           OutlinedButton(
-            style:
-                OutlinedButton.styleFrom(
+            style: OutlinedButton.styleFrom(
               foregroundColor: danger,
             ),
             onPressed: actionLoading
                 ? null
                 : () {
-                    rejectEmployee(
-                      employee,
-                    );
+                    rejectEmployee(employee);
                   },
-            child:
-                const Text('Reject'),
+            child: const Text('Reject'),
           ),
+
           const SizedBox(width: 10),
+
           FilledButton(
-            style:
-                FilledButton.styleFrom(
+            style: FilledButton.styleFrom(
               backgroundColor: primary,
             ),
             onPressed: actionLoading
                 ? null
                 : () {
-                    approveEmployee(
-                      employee,
-                    );
+                    approveEmployee(employee);
                   },
-            child:
-                const Text('Approve'),
+            child: const Text('Approve'),
           ),
         ],
-      ),
-    );
-  }
-
+      ],
+    ),
+  );
+}
   Widget _badge(
     String text,
     Color color,

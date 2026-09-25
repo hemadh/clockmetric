@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class BillingScreen extends StatefulWidget {
   final String workspaceId;
@@ -18,98 +19,499 @@ class _BillingScreenState extends State<BillingScreen> {
 
   int activeEmployeeCount = 0;
 
+  static const double withoutAiPrice = 10.0;
+  static const double withAiPrice = 13.0;
 
-  double billingPricePerEmployee = 5.0;
-String billingCurrency = 'AUD';
-String subscriptionStatus = 'trialing';
+  String selectedPlanType = 'with_ai';
+  double billingPricePerEmployee = withAiPrice;
+  String billingCurrency = 'AUD';
+  String subscriptionStatus = 'trialing';
 
-DateTime? trialStartedAt;
-DateTime? trialEndsAt;
-DateTime? currentPeriodEnd;
+  DateTime? trialStartedAt;
+  DateTime? trialEndsAt;
+  DateTime? currentPeriodEnd;
+
+  String stripeCustomerId = '';
+  String stripeSubscriptionId = '';
+
+  bool loadingBilling = true;
+  bool billingActionLoading = false;
 
 
-bool get isTrialExpired {
-  if (trialEndsAt == null) return false;
+  bool get isTrialExpired {
+    if (trialEndsAt == null) return false;
 
-  return subscriptionStatus == 'trialing' &&
-      DateTime.now().isAfter(trialEndsAt!);
-}
+    return subscriptionStatus == 'trialing' &&
+        DateTime.now().toUtc().isAfter(
+              trialEndsAt!.toUtc(),
+            );
+  }
+
+  bool get subscriptionAccessEnded {
+    if (isTrialExpired) return true;
+
+    if (subscriptionStatus == 'expired' ||
+        subscriptionStatus == 'unpaid') {
+      return true;
+    }
+
+    if (subscriptionStatus == 'cancelled' &&
+        currentPeriodEnd != null) {
+      return DateTime.now().toUtc().isAfter(
+            currentPeriodEnd!.toUtc(),
+          );
+    }
+
+    return false;
+  }
+
+  bool get canOpenBillingPortal =>
+      stripeCustomerId.isNotEmpty &&
+      stripeSubscriptionId.isNotEmpty &&
+      (subscriptionStatus == 'active' ||
+          subscriptionStatus == 'past_due' ||
+          subscriptionStatus == 'cancelled');
+
+  String get planDisplayName =>
+      selectedPlanType == 'with_ai'
+          ? 'ClockMetric AI'
+          : 'ClockMetric Standard';
+
+  String get planShortLabel =>
+      selectedPlanType == 'with_ai'
+          ? 'With AI'
+          : 'Without AI';
+
+  double get selectedPlanPrice =>
+      selectedPlanType == 'with_ai'
+          ? withAiPrice
+          : withoutAiPrice;
+
+  void _selectPlan(String planType) {
+    if (canOpenBillingPortal || billingActionLoading) return;
+
+    setState(() {
+      selectedPlanType = planType;
+      billingPricePerEmployee =
+          planType == 'with_ai'
+              ? withAiPrice
+              : withoutAiPrice;
+    });
+  }
+
+  String get billingActionLabel {
+    if (billingActionLoading) {
+      return 'Opening...';
+    }
+
+    if (canOpenBillingPortal) {
+      return subscriptionStatus == 'past_due'
+          ? 'Update Payment'
+          : 'Manage Subscription';
+    }
+
+    return 'Subscribe Now';
+  }
 
 
   @override
-void initState() {
-  super.initState();
-  _loadActiveEmployeeCount();
-  _loadBillingDetails();
-}
-
-Future<void> _loadActiveEmployeeCount() async {
-  try {
-    final response = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('workspace_id', widget.workspaceId)
-        .eq('approval_status', 'approved')
-        .eq('is_active', true)
-        .neq('role', 'admin');
-
-    if (!mounted) return;
-
-    setState(() {
-      activeEmployeeCount = response.length;
-    });
-  } catch (e) {
-    debugPrint('Billing employee count error: $e');
+  void initState() {
+    super.initState();
+    _loadActiveEmployeeCount();
+    _loadBillingDetails();
   }
-}
 
-Future<void> _loadBillingDetails() async {
-  try {
-    final response = await supabase
-        .from('workspaces')
-        .select(
-          'billing_price_per_employee, billing_currency, '
-'subscription_status, trial_started_at, trial_ends_at, current_period_end',
-        )
-        .eq('id', widget.workspaceId)
-        .single();
+  Future<void> _loadActiveEmployeeCount() async {
+    try {
+      final response = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('workspace_id', widget.workspaceId)
+          .eq('role', 'employee')
+          .eq('approval_status', 'approved')
+          .eq('is_active', true);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      billingPricePerEmployee =
-          (response['billing_price_per_employee'] as num?)?.toDouble() ?? 5.0;
-
-      billingCurrency =
-          response['billing_currency']?.toString() ?? 'AUD';
-
-      subscriptionStatus =
-          response['subscription_status']?.toString() ?? 'trialing';
-
-      final trialStart = response['trial_started_at']?.toString();
-      final trialEnd = response['trial_ends_at']?.toString();
-
-      trialStartedAt =
-          trialStart == null ? null : DateTime.tryParse(trialStart);
-
-      trialEndsAt =
-          trialEnd == null ? null : DateTime.tryParse(trialEnd);
-
-      final periodEnd = response['current_period_end']?.toString();
-
-currentPeriodEnd =
-    periodEnd == null ? null : DateTime.tryParse(periodEnd);
-    });
-  } catch (e) {
-    debugPrint('Billing details error: $e');
+      setState(() {
+        activeEmployeeCount = response.length;
+      });
+    } catch (e) {
+      debugPrint('Billing employee count error: $e');
+    }
   }
-}
+
+  Future<void> _loadBillingDetails() async {
+    if (mounted) {
+      setState(() {
+        loadingBilling = true;
+      });
+    }
+
+    try {
+      final subscriptionResponse = await supabase
+          .from('workspace_subscriptions')
+          .select(
+            'plan_type, price_per_employee, currency, status, '
+            'trial_start, trial_end, current_period_end, '
+            'stripe_customer_id, stripe_subscription_id, stripe_price_id',
+          )
+          .eq('workspace_id', widget.workspaceId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      final rowPlanType =
+          subscriptionResponse?['plan_type']
+                  ?.toString()
+                  .trim()
+                  .toLowerCase() ??
+              'with_ai';
+
+      final normalizedPlanType =
+          rowPlanType == 'without_ai'
+              ? 'without_ai'
+              : 'with_ai';
+
+      final trialStartText =
+          subscriptionResponse?['trial_start']?.toString();
+      final trialEndText =
+          subscriptionResponse?['trial_end']?.toString();
+      final periodEndText =
+          subscriptionResponse?['current_period_end']?.toString();
+
+      final parsedTrialStart = trialStartText == null
+          ? null
+          : DateTime.tryParse(trialStartText);
+      final parsedTrialEnd = trialEndText == null
+          ? null
+          : DateTime.tryParse(trialEndText);
+      final parsedPeriodEnd = periodEndText == null
+          ? null
+          : DateTime.tryParse(periodEndText);
+
+      final customerId =
+          subscriptionResponse?['stripe_customer_id']
+                  ?.toString()
+                  .trim() ??
+              '';
+
+      final subscriptionId =
+          subscriptionResponse?['stripe_subscription_id']
+                  ?.toString()
+                  .trim() ??
+              '';
+
+      var loadedStatus =
+          subscriptionResponse?['status']
+                  ?.toString()
+                  .trim()
+                  .toLowerCase() ??
+              'trialing';
+
+      // Until Stripe has actually created a subscription, a workspace
+      // with a trial date is still a trial even if old seed/test data
+      // says "active".
+      if (subscriptionId.isEmpty && parsedTrialEnd != null) {
+        loadedStatus = 'trialing';
+      }
+
+      setState(() {
+        selectedPlanType = normalizedPlanType;
+        billingPricePerEmployee =
+            normalizedPlanType == 'with_ai'
+                ? withAiPrice
+                : withoutAiPrice;
+
+        billingCurrency =
+            subscriptionResponse?['currency']
+                    ?.toString()
+                    .trim()
+                    .toUpperCase() ??
+                'AUD';
+
+        subscriptionStatus = loadedStatus;
+        trialStartedAt = parsedTrialStart;
+        trialEndsAt = parsedTrialEnd;
+        currentPeriodEnd = parsedPeriodEnd;
+        stripeCustomerId = customerId;
+        stripeSubscriptionId = subscriptionId;
+        loadingBilling = false;
+      });
+    } catch (e) {
+      debugPrint('Billing details error: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        loadingBilling = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to load billing details: $e',
+          ),
+        ),
+      );
+    }
+  }
 
 
   static const orange = Color(0xFFF97316);
   static const textDark = Color(0xFF1F2937);
   static const textGrey = Color(0xFF6B7280);
   static const border = Color(0xFFE5E7EB);
+
+
+
+  Future<void> _openStripeCheckout() async {
+    if (billingActionLoading) return;
+
+    if (activeEmployeeCount <= 0) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Add at least one active employee before subscribing.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    setState(() {
+      billingActionLoading = true;
+    });
+
+    try {
+      final response = await supabase.functions.invoke(
+        'create-checkout-session',
+        body: {
+          'workspaceId': widget.workspaceId,
+          'quantity': activeEmployeeCount,
+          'planType': selectedPlanType,
+        },
+      );
+
+      final data = response.data;
+
+      if (data == null || data['url'] == null) {
+        throw Exception(
+          'Stripe checkout URL was not returned.',
+        );
+      }
+
+      final checkoutUrl =
+          Uri.parse(data['url'].toString());
+
+      final opened = await launchUrl(
+        checkoutUrl,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!opened) {
+        throw Exception(
+          'Could not open Stripe Checkout.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Stripe checkout error: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to open payment page: $e',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          billingActionLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openBillingPortal() async {
+    if (billingActionLoading) return;
+
+    setState(() {
+      billingActionLoading = true;
+    });
+
+    try {
+      final response = await supabase.functions.invoke(
+        'create-billing-portal-session',
+        body: {
+          'workspaceId': widget.workspaceId,
+        },
+      );
+
+      final data = response.data;
+
+      if (data == null || data['url'] == null) {
+        throw Exception(
+          'Stripe billing portal URL was not returned.',
+        );
+      }
+
+      final portalUrl =
+          Uri.parse(data['url'].toString());
+
+      final opened = await launchUrl(
+        portalUrl,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!opened) {
+        throw Exception(
+          'Could not open Stripe Billing Portal.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Stripe portal error: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to open subscription management: $e',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          billingActionLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleBillingAction() async {
+    if (canOpenBillingPortal) {
+      await _openBillingPortal();
+      return;
+    }
+
+    await _openStripeCheckout();
+  }
+
+  Future<void> _refreshBilling() async {
+    await Future.wait([
+      _loadActiveEmployeeCount(),
+      _loadBillingDetails(),
+    ]);
+  }
+
+  String _money(num value) {
+    final amount = value.toDouble();
+    final text = amount == amount.roundToDouble()
+        ? amount.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+
+    if (billingCurrency == 'AUD') {
+      return 'A\$$text';
+    }
+
+    return '$billingCurrency $text';
+  }
+
+  String _dateText(DateTime? value) {
+    if (value == null) return 'Not set';
+
+    final local = value.toLocal();
+
+    return '${local.day.toString().padLeft(2, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/'
+        '${local.year}';
+  }
+
+  int get trialDaysRemaining {
+    if (trialEndsAt == null) return 0;
+
+    final now = DateTime.now().toUtc();
+    final end = trialEndsAt!.toUtc();
+
+    if (!end.isAfter(now)) return 0;
+
+    final difference = end.difference(now);
+
+    return (difference.inHours / 24).ceil();
+  }
+
+  Color get statusBadgeBackground {
+    if (subscriptionStatus == 'active') {
+      return const Color(0xFFDCFCE7);
+    }
+
+    if (subscriptionStatus == 'trialing' &&
+        !isTrialExpired) {
+      return const Color(0xFFFEF3C7);
+    }
+
+    if (subscriptionStatus == 'past_due') {
+      return const Color(0xFFFFEDD5);
+    }
+
+    if (subscriptionAccessEnded) {
+      return const Color(0xFFFEE2E2);
+    }
+
+    return const Color(0xFFEFF6FF);
+  }
+
+  Color get statusBadgeForeground {
+    if (subscriptionStatus == 'active') {
+      return const Color(0xFF15803D);
+    }
+
+    if (subscriptionStatus == 'trialing' &&
+        !isTrialExpired) {
+      return const Color(0xFFB45309);
+    }
+
+    if (subscriptionStatus == 'past_due') {
+      return const Color(0xFFC2410C);
+    }
+
+    if (subscriptionAccessEnded) {
+      return const Color(0xFFB91C1C);
+    }
+
+    return const Color(0xFF1D4ED8);
+  }
+
+  String get displaySubscriptionStatus {
+    if (isTrialExpired) return 'TRIAL ENDED';
+
+    switch (subscriptionStatus) {
+      case 'trialing':
+        return 'TRIAL';
+      case 'active':
+        return 'ACTIVE';
+      case 'past_due':
+        return 'PAST DUE';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'unpaid':
+        return 'UNPAID';
+      case 'expired':
+        return 'EXPIRED';
+      default:
+        return subscriptionStatus
+            .replaceAll('_', ' ')
+            .toUpperCase();
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -129,23 +531,45 @@ currentPeriodEnd =
                   // =========================
                   // HEADER
                   // =========================
-                  const Text(
-                    'Billing & Subscription',
-                    style: TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.bold,
-                      color: textDark,
-                    ),
-                  ),
-
-                  const SizedBox(height: 3),
-
-                  const Text(
-                    'Manage your subscription, billing information and invoices.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: textGrey,
-                    ),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Billing & Subscription',
+                              style: TextStyle(
+                                fontSize: 23,
+                                fontWeight:
+                                    FontWeight.bold,
+                                color: textDark,
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Manage your subscription, billing information and invoices.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: textGrey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Refresh billing',
+                        onPressed: loadingBilling
+                            ? null
+                            : _refreshBilling,
+                        icon: const Icon(
+                          Icons.refresh_rounded,
+                          color: orange,
+                          size: 20,
+                        ),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: 14),
@@ -171,9 +595,11 @@ currentPeriodEnd =
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'CURRENT PLAN',
-                                style: TextStyle(
+                              Text(
+                                canOpenBillingPortal
+                                    ? 'CURRENT PLAN'
+                                    : 'SELECTED PLAN',
+                                style: const TextStyle(
                                   fontSize: 10,
                                   color: textGrey,
                                   fontWeight: FontWeight.bold,
@@ -183,9 +609,9 @@ currentPeriodEnd =
 
                               const SizedBox(height: 5),
 
-                              const Text(
-                                'ClockMetric Standard',
-                                style: TextStyle(
+                              Text(
+                                planDisplayName,
+                                style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.bold,
                                   color: textDark,
@@ -194,20 +620,24 @@ currentPeriodEnd =
 
                               const SizedBox(height: 8),
 
-                              const Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                              Row(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    'A\$5',
-                                    style: TextStyle(
+                                    _money(
+                                      billingPricePerEmployee,
+                                    ),
+                                    style: const TextStyle(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
                                       color: orange,
                                     ),
                                   ),
-                                  SizedBox(width: 6),
-                                  Padding(
-                                    padding: EdgeInsets.only(bottom: 4),
+                                  const SizedBox(width: 6),
+                                  const Padding(
+                                    padding:
+                                        EdgeInsets.only(bottom: 4),
                                     child: Text(
                                       '/ active employee / month',
                                       style: TextStyle(
@@ -251,25 +681,21 @@ currentPeriodEnd =
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDCFCE7),
-                                  borderRadius: BorderRadius.circular(20),
+                                  color:
+                                      statusBadgeBackground,
+                                  borderRadius:
+                                      BorderRadius.circular(20),
                                 ),
                                 child: Text(
-  subscriptionStatus == 'trialing'
-      ? 'TRIAL'
-      : subscriptionStatus == 'active'
-          ? 'ACTIVE'
-          : subscriptionStatus == 'past_due'
-              ? 'PAST DUE'
-              : subscriptionStatus == 'cancelled'
-                  ? 'CANCELLED'
-                  : subscriptionStatus.toUpperCase(),
-  style: const TextStyle(
-    color: Color(0xFF15803D),
-    fontWeight: FontWeight.bold,
-    fontSize: 9,
-  ),
-),
+                                  displaySubscriptionStatus,
+                                  style: TextStyle(
+                                    color:
+                                        statusBadgeForeground,
+                                    fontWeight:
+                                        FontWeight.bold,
+                                    fontSize: 9,
+                                  ),
+                                ),
                               ),
 
                               const SizedBox(height: 10),
@@ -286,7 +712,7 @@ currentPeriodEnd =
   isTrialExpired
       ? 'Trial ended'
       : subscriptionStatus == 'trialing' && trialEndsAt != null
-          ? '${trialEndsAt!.difference(DateTime.now()).inDays.clamp(0, 14)} days left in free trial'
+          ? '$trialDaysRemaining days left in free trial'
           : subscriptionStatus == 'active'
               ? 'Subscription active'
               : subscriptionStatus == 'past_due'
@@ -312,9 +738,13 @@ currentPeriodEnd =
         ? 'Please update your payment information.'
         : subscriptionStatus == 'cancelled'
             ? 'Your subscription has been cancelled.'
-            : isTrialExpired
-                ? 'Your free trial has ended.'
-                : 'No payment required during your trial.',
+            : subscriptionStatus == 'unpaid'
+                ? 'Payment is required to restore access.'
+                : subscriptionStatus == 'expired'
+                    ? 'Your subscription has expired.'
+                    : isTrialExpired
+                        ? 'Your free trial has ended.'
+                        : 'No payment required during your trial.',
                                 style: TextStyle(
                                   fontSize: 10.5,
                                   color: textGrey,
@@ -328,6 +758,67 @@ currentPeriodEnd =
                   ),
 
                   const SizedBox(height: 12),
+
+                  if (!canOpenBillingPortal) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'CHOOSE YOUR PLAN',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: textGrey,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: .8,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          const Text(
+                            'You can choose a plan before continuing to secure payment.',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: textGrey,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _planOption(
+                                  planType: 'without_ai',
+                                  title: 'Without AI',
+                                  price: withoutAiPrice,
+                                  subtitle:
+                                      'Time tracking, screenshots and reports',
+                                  icon: Icons.timer_outlined,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _planOption(
+                                  planType: 'with_ai',
+                                  title: 'With AI',
+                                  price: withAiPrice,
+                                  subtitle:
+                                      'Includes AI activity summaries and insights',
+                                  icon: Icons.auto_awesome_rounded,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
 
                   // =========================
                   // SUMMARY CARDS
@@ -351,13 +842,13 @@ currentPeriodEnd =
                           icon: Icons.calculate_rounded,
                           iconColor: const Color(0xFF3B82F6),
                           title: 'Estimated Monthly Bill',
-                          value:
-    '${billingCurrency == 'AUD' ? 'A\$' : billingCurrency} '
-    '${(activeEmployeeCount * billingPricePerEmployee).toStringAsFixed(0)}',
+                          value: _money(
+                            activeEmployeeCount *
+                                billingPricePerEmployee,
+                          ),
                           subtitle:
-    '${billingCurrency == 'AUD' ? 'A\$' : billingCurrency}'
-    '${billingPricePerEmployee.toStringAsFixed(0)} × '
-    '$activeEmployeeCount active employees',
+                              '${_money(billingPricePerEmployee)} × '
+                              '$activeEmployeeCount active employees',
                         ),
                       ),
 
@@ -389,7 +880,11 @@ currentPeriodEnd =
             ? 'Payment issue requires attention'
             : subscriptionStatus == 'cancelled'
                 ? 'Subscription cancelled'
-                : 'Subscription status',
+                : subscriptionStatus == 'unpaid'
+                    ? 'Payment required'
+                    : subscriptionStatus == 'expired'
+                        ? 'Subscription expired'
+                        : 'Subscription status',
                         ),
                       ),
                     ],
@@ -443,16 +938,9 @@ currentPeriodEnd =
 
 value: (subscriptionStatus == 'active' ||
             subscriptionStatus == 'past_due' ||
-            subscriptionStatus == 'cancelled') &&
-        currentPeriodEnd != null
-    ? '${currentPeriodEnd!.day.toString().padLeft(2, '0')}/'
-      '${currentPeriodEnd!.month.toString().padLeft(2, '0')}/'
-      '${currentPeriodEnd!.year}'
-    : trialEndsAt == null
-        ? 'Not set'
-        : '${trialEndsAt!.day.toString().padLeft(2, '0')}/'
-          '${trialEndsAt!.month.toString().padLeft(2, '0')}/'
-          '${trialEndsAt!.year}',
+            subscriptionStatus == 'cancelled')
+        ? _dateText(currentPeriodEnd)
+        : _dateText(trialEndsAt),
                                     ),
                                   ),
 
@@ -476,7 +964,9 @@ value: (subscriptionStatus == 'active' ||
                                 icon: Icons.payment_rounded,
                                 iconColor: const Color(0xFF22C55E),
                                 title: 'Payment method',
-                                value: 'No payment method added',
+                                value: stripeCustomerId.isEmpty
+                                    ? 'Not added yet'
+                                    : 'Managed securely in Stripe',
                               ),
 
                               const SizedBox(height: 13),
@@ -511,8 +1001,17 @@ value: (subscriptionStatus == 'active' ||
         : subscriptionStatus == 'past_due'
             ? 'There is a payment issue with your subscription.'
             : subscriptionStatus == 'cancelled'
-                ? 'Your subscription has been cancelled.'
-                : 'Free trial active — you will not be charged until the trial ends.',
+                ? currentPeriodEnd != null &&
+                        DateTime.now().toUtc().isBefore(
+                              currentPeriodEnd!.toUtc(),
+                            )
+                    ? 'Your subscription is cancelled. Access remains available until ${_dateText(currentPeriodEnd)}.'
+                    : 'Your subscription has ended.'
+                : subscriptionStatus == 'unpaid'
+                    ? 'Payment is required before ClockMetric access can continue.'
+                    : subscriptionStatus == 'expired'
+                        ? 'Your subscription has expired. Subscribe to restore access.'
+                        : 'Free trial active — you will not be charged until the trial ends.',
                                         style: TextStyle(
                                           fontSize: 10.5,
                                           color: textDark,
@@ -529,114 +1028,16 @@ value: (subscriptionStatus == 'active' ||
                                 width: double.infinity,
                                 height: 38,
                                 child: ElevatedButton.icon(
-                                  onPressed: () {
-  showDialog(
-    context: context,
-    builder: (context) {
-      final estimatedMonthly =
-          activeEmployeeCount * billingPricePerEmployee;
-
-      return AlertDialog(
-        title: const Text(
-          'Subscription Summary',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _dialogRow(
-                'Plan',
-                'ClockMetric Standard',
-              ),
-              _dialogRow(
-                'Active employees',
-                '$activeEmployeeCount',
-              ),
-              _dialogRow(
-                'Price per employee',
-                '${billingCurrency == 'AUD' ? 'A\$' : billingCurrency}'
-                    '${billingPricePerEmployee.toStringAsFixed(0)} / month',
-              ),
-              _dialogRow(
-                'Estimated monthly total',
-                '${billingCurrency == 'AUD' ? 'A\$' : billingCurrency}'
-                    '${estimatedMonthly.toStringAsFixed(0)}',
-              ),
-              _dialogRow(
-                'Subscription status',
-                isTrialExpired
-                    ? 'Trial ended'
-                    : subscriptionStatus == 'trialing'
-                        ? 'Trial'
-                        : subscriptionStatus,
-              ),
-
-              _dialogRow(
-  subscriptionStatus == 'cancelled'
-      ? 'Access until'
-      : subscriptionStatus == 'active' || subscriptionStatus == 'past_due'
-          ? 'Billing period ends'
-          : 'Trial ends',
-  (subscriptionStatus == 'active' ||
-              subscriptionStatus == 'past_due' ||
-              subscriptionStatus == 'cancelled') &&
-          currentPeriodEnd != null
-      ? '${currentPeriodEnd!.day.toString().padLeft(2, '0')}/'
-        '${currentPeriodEnd!.month.toString().padLeft(2, '0')}/'
-        '${currentPeriodEnd!.year}'
-      : trialEndsAt != null
-          ? '${trialEndsAt!.day.toString().padLeft(2, '0')}/'
-            '${trialEndsAt!.month.toString().padLeft(2, '0')}/'
-            '${trialEndsAt!.year}'
-          : 'Not set',
-),
-
-              const SizedBox(height: 18),
-
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF7ED),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Text(
-                  'Payment setup is not connected yet. '
-                  'Your subscription details are ready, and a payment provider '
-                  'can be connected later.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('Close'),
-          ),
-        ],
-      );
-    },
-  );
-},
+                                  onPressed: billingActionLoading
+                                      ? null
+                                      : _handleBillingAction,
                                   icon: const Icon(
                                     Icons.credit_card_rounded,
                                     size: 17,
                                   ),
-                                  label: const Text(
-                                    'Manage Subscription',
-                                    style: TextStyle(
+                                  label: Text(
+                                    billingActionLabel,
+                                    style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -703,12 +1104,27 @@ value: (subscriptionStatus == 'active' ||
                                           color: textDark,
                                         ),
                                       ),
-                                      Text(
-                                        'View all',
-                                        style: TextStyle(
-                                          color: orange,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
+                                      TextButton(
+                                        onPressed:
+                                            canOpenBillingPortal &&
+                                                    !billingActionLoading
+                                                ? _openBillingPortal
+                                                : null,
+                                        style: TextButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          minimumSize:
+                                              const Size(0, 28),
+                                          visualDensity:
+                                              VisualDensity.compact,
+                                        ),
+                                        child: const Text(
+                                          'View in Stripe',
+                                          style: TextStyle(
+                                            color: orange,
+                                            fontSize: 10,
+                                            fontWeight:
+                                                FontWeight.bold,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -771,43 +1187,43 @@ value: (subscriptionStatus == 'active' ||
                               padding: const EdgeInsets.all(13),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFFFF7ED),
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius:
+                                    BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: const Color(0xFFFED7AA),
+                                  color:
+                                      const Color(0xFFFED7AA),
                                 ),
                               ),
-                              child: const Row(
+                              child: Row(
                                 crossAxisAlignment:
                                     CrossAxisAlignment.start,
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.lightbulb_outline_rounded,
                                     color: orange,
                                     size: 20,
                                   ),
-
-                                  SizedBox(width: 9),
-
+                                  const SizedBox(width: 9),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(
+                                        const Text(
                                           'How billing works',
                                           style: TextStyle(
                                             fontSize: 12,
-                                            fontWeight: FontWeight.bold,
+                                            fontWeight:
+                                                FontWeight.bold,
                                             color: textDark,
                                           ),
                                         ),
-
-                                        SizedBox(height: 5),
-
+                                        const SizedBox(height: 5),
                                         Text(
-                                          'A\$5 per active employee/month.\n'
+                                          '$planShortLabel: ${_money(billingPricePerEmployee)} per active employee/month.\n'
                                           'Disabled employees stop counting from the next billing cycle.',
-                                          style: TextStyle(
+                                          style:
+                                              const TextStyle(
                                             fontSize: 9.5,
                                             color: textGrey,
                                             height: 1.45,
@@ -830,6 +1246,105 @@ value: (subscriptionStatus == 'active' ||
           ),
         );
       },
+    );
+  }
+
+  Widget _planOption({
+    required String planType,
+    required String title,
+    required double price,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final selected = selectedPlanType == planType;
+
+    return InkWell(
+      onTap: billingActionLoading
+          ? null
+          : () => _selectPlan(planType),
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFFFFF7ED)
+              : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? orange : border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFFFFEDD5)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(
+                icon,
+                color: selected ? orange : textGrey,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: textDark,
+                          ),
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: orange,
+                          size: 17,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${_money(price)} / active employee / month',
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: orange,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 9.5,
+                      color: textGrey,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -970,30 +1485,4 @@ value: (subscriptionStatus == 'active' ||
       ],
     );
   }
-  Widget _dialogRow(String label, String value) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: textGrey,
-            ),
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: textDark,
-          ),
-        ),
-      ],
-    ),
-  );
-}
 }

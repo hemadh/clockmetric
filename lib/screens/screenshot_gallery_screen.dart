@@ -3,9 +3,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:encrypter_plus/encrypter_plus.dart' as encrypt;
 import 'package:intl/intl.dart';
 
 import '../main.dart';
+import '../services/screenshot_cleanup_service.dart';
 
 class ScreenshotGalleryScreen extends StatefulWidget {
   const ScreenshotGalleryScreen({super.key});
@@ -38,6 +40,7 @@ class _ScreenshotGalleryScreenState
 String selectedEmployee = 'All Employees';
 
   final Map<String, Future<Uint8List?>> _imageFutures = {};
+  final ScreenshotCleanupService _cleanupService = ScreenshotCleanupService();
 
   bool get isAdmin =>
       currentUserRole.trim().toLowerCase() == 'admin';
@@ -124,7 +127,43 @@ final earliestScreenshotDate = currentWeekStart.subtract(
       if (!mounted) return;
 
       final loadedScreenshots =
-    List<Map<String, dynamic>>.from(response);
+          List<Map<String, dynamic>>.from(response);
+
+      // Load project names separately so screenshot loading does not depend
+      // on a direct PostgREST relationship between screenshots and projects.
+      // If this lookup ever fails, screenshots still load normally.
+      final Map<String, String> projectNamesById = {};
+
+      try {
+        final projectRows = await supabase
+            .from('projects')
+            .select('id, project_name')
+            .eq('workspace_id', currentWorkspaceId);
+
+        for (final project in projectRows) {
+          final projectId =
+              project['id']?.toString().trim() ?? '';
+
+          final projectName =
+              project['project_name']?.toString().trim() ?? '';
+
+          if (projectId.isNotEmpty && projectName.isNotEmpty) {
+            projectNamesById[projectId] = projectName;
+          }
+        }
+      } catch (error) {
+        debugPrint(
+          'Project names could not be loaded for screenshots: $error',
+        );
+      }
+
+      for (final screenshot in loadedScreenshots) {
+        final projectId =
+            screenshot['project_id']?.toString().trim() ?? '';
+
+        screenshot['project_name'] =
+            projectNamesById[projectId] ?? '';
+      }
 
 final employeeNames = loadedScreenshots
     .map(
@@ -160,49 +199,63 @@ setState(() {
     }
   }
 Future<Uint8List?> loadDecryptedImage(
-  String screenshotId,
+  Map<String, dynamic> screenshot,
 ) async {
-  if (screenshotId.trim().isEmpty) {
+  final screenshotId =
+      screenshot['id']?.toString().trim() ?? '';
+
+  final imagePath =
+      screenshot['secure_image_path']?.toString().trim() ?? '';
+
+  if (screenshotId.isEmpty || imagePath.isEmpty) {
     return null;
   }
 
   try {
-    final session = supabase.auth.currentSession;
+    // Download the encrypted .enc bytes from the CURRENT Supabase project.
+    final encryptedBytes = await supabase.storage
+        .from('employee-screenshots')
+        .download(imagePath);
 
-    if (session == null) {
-      debugPrint('No active Supabase session');
+    if (encryptedBytes.isEmpty) {
       return null;
     }
 
-    final response = await http.post(
-      Uri.parse(
-        'https://zakvowocgunowgxxslqm.supabase.co/'
-        'functions/v1/decrypt-screenshot',
-      ),
-      headers: {
-        'Authorization': 'Bearer ${session.accessToken}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'screenshot_id': screenshotId,
-      }),
+    // Must match ScreenshotSchedulerService exactly.
+    final key = encrypt.Key.fromUtf8(
+      '12345678901234567890123456789012',
     );
 
-    if (response.statusCode < 200 ||
-        response.statusCode >= 300) {
-      debugPrint(
-        'Screenshot function failed: '
-        '${response.statusCode} ${response.body}',
-      );
+    final iv = encrypt.IV.fromUtf8(
+      '1234567890123456',
+    );
+
+    final encrypter = encrypt.Encrypter(
+      encrypt.AES(
+        key,
+        mode: encrypt.AESMode.cbc,
+      ),
+    );
+
+    final decryptedBytes = encrypter.decryptBytes(
+      encrypt.Encrypted(encryptedBytes),
+      iv: iv,
+    );
+
+    if (decryptedBytes.isEmpty) {
       return null;
     }
 
-    return response.bodyBytes;
+    return Uint8List.fromList(
+      decryptedBytes,
+    );
   } catch (error, stackTrace) {
     debugPrint(
-      'Screenshot unavailable for $screenshotId: $error',
+      'Screenshot decrypt failed for $screenshotId: $error',
     );
-    debugPrintStack(stackTrace: stackTrace);
+    debugPrintStack(
+      stackTrace: stackTrace,
+    );
     return null;
   }
 }
@@ -215,9 +268,10 @@ Future<Uint8List?> loadDecryptedImage(
 
     return _imageFutures.putIfAbsent(
       screenshotId,
-      () => loadDecryptedImage(screenshotId),
+      () => loadDecryptedImage(screenshot),
     );
   }
+
 
   void previousDay() {
   final today = DateTime.now();
@@ -405,6 +459,25 @@ return '${DateFormat('h a').format(start)} - '
     '${DateFormat('h a').format(end)}';
   }
 
+  String _projectDisplayName(Map<String, dynamic> screenshot) {
+    final projectName =
+        screenshot['project_name']?.toString().trim() ?? '';
+
+    if (projectName.isEmpty) {
+      return 'Project: No Project';
+    }
+
+    final cleanName = projectName.replaceFirst(
+      RegExp(
+        r'^project\s*:\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    return 'Project: ${cleanName.trim()}';
+  }
+
   String initials(String name) {
     final cleanName = name.trim();
 
@@ -492,6 +565,9 @@ return '${DateFormat('h a').format(start)} - '
       screenshot['captured_at'],
     );
 
+    final projectLabel =
+        _projectDisplayName(screenshot);
+
     showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -532,13 +608,30 @@ return '${DateFormat('h a').format(start)} - '
                       borderRadius:
                           BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      '$employee • $capturedTime',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight:
-                            FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$employee • $capturedTime',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight:
+                                FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          projectLabel,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight:
+                                FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -566,6 +659,66 @@ return '${DateFormat('h a').format(start)} - '
     );
   }
 
+  Future<void> deleteScreenshot(
+    Map<String, dynamic> screenshot,
+  ) async {
+    final screenshotId =
+        screenshot['id']?.toString() ?? '';
+    final imagePath =
+        screenshot['secure_image_path']?.toString() ?? '';
+
+    if (screenshotId.isEmpty || imagePath.isEmpty) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete screenshot?'),
+          content: const Text(
+            'Are you sure you want to delete this screenshot?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    await _cleanupService.deleteScreenshot(
+      screenshotId: screenshotId,
+      imagePath: imagePath,
+    );
+
+    _imageFutures.remove(screenshotId);
+
+    if (!mounted) return;
+
+    setState(() {
+      screenshots.removeWhere(
+        (item) => item['id']?.toString() == screenshotId,
+      );
+    });
+  }
+
   Widget screenshotCard(
     Map<String, dynamic> screenshot, {
     required double cardWidth,
@@ -577,6 +730,9 @@ return '${DateFormat('h a').format(start)} - '
     final employeeName =
         screenshot['employee_name']?.toString() ??
             'Employee';
+
+    final projectLabel =
+        _projectDisplayName(screenshot);
 
     // Keep a 16:9 screenshot shape.
     final imageHeight = cardWidth * 9 / 16;
@@ -594,9 +750,11 @@ return '${DateFormat('h a').format(start)} - '
 
         final imageBytes = snapshot.data;
 
-        // Do not display missing files or lock cards.
         if (imageBytes == null) {
-          return const SizedBox.shrink();
+          return _missingScreenshotCard(
+            capturedTime: capturedTime,
+            cardWidth: cardWidth,
+          );
         }
 
         return SizedBox(
@@ -652,6 +810,32 @@ return '${DateFormat('h a').format(start)} - '
                           },
                         ),
                       ),
+                      Positioned(
+                        top: 5,
+                        right: 5,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: IconButton(
+                            tooltip: 'Delete screenshot',
+                            padding: const EdgeInsets.all(4),
+                            constraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                            onPressed: () {
+                              deleteScreenshot(screenshot);
+                            },
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -685,10 +869,81 @@ return '${DateFormat('h a').format(start)} - '
                   ),
                 ],
               ),
+              const SizedBox(height: 3),
+              Text(
+                projectLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: secondaryText,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _missingScreenshotCard({
+    required String capturedTime,
+    required double cardWidth,
+  }) {
+    final imageHeight = cardWidth * 9 / 16;
+
+    return SizedBox(
+      width: cardWidth,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: cardWidth,
+            height: imageHeight,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(
+                color: borderColor,
+              ),
+            ),
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.image_not_supported_outlined,
+                    size: 26,
+                    color: secondaryText,
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Image unavailable',
+                    style: TextStyle(
+                      color: secondaryText,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              capturedTime,
+              style: const TextStyle(
+                color: secondaryText,
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1341,4 +1596,4 @@ class _ScreenshotHoverOverlayState
       ),
     );
   }
-}
+    }

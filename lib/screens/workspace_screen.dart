@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../theme/app_colors.dart';
+import 'package:flutter/foundation.dart';
 
 class WorkspaceScreen extends StatefulWidget {
   const WorkspaceScreen({super.key});
@@ -635,7 +636,9 @@ final response = await supabase.functions.invoke(
     'email': email,
     'role': 'employee',
     'workspace_id': currentWorkspaceId,
-    'redirect_to': 'timetracker://invite',
+    'redirect_to': kIsWeb
+    ? 'https://clockmetric-app.netlify.app'
+    : 'timetracker://invite',
   },
 );
 
@@ -732,7 +735,9 @@ final response = await supabase.functions.invoke(
       );
     }
   }
-  Future<void> resendWorkspaceInvitation(
+
+
+Future<void> resendWorkspaceInvitation(
   Map<String, dynamic> employee,
 ) async {
   final email =
@@ -758,14 +763,18 @@ final response = await supabase.functions.invoke(
       body: {
         'email': email,
         'workspace_id': currentWorkspaceId,
-        'redirect_to': 'timetracker://invite',
+        'redirect_to': kIsWeb
+            ? 'https://clockmetric-app.netlify.app'
+            : 'timetracker://invite',
       },
     );
 
     final data = response.data;
 
     if (data is Map && data['error'] != null) {
-      throw Exception(data['error'].toString());
+      throw Exception(
+        data['error'].toString(),
+      );
     }
 
     showMessage(
@@ -781,7 +790,9 @@ final response = await supabase.functions.invoke(
     final errorText = error.toString();
 
     showMessage(
-      errorText.contains('No active pending invitation')
+      errorText.contains(
+        'No active pending invitation',
+      )
           ? 'This invitation is no longer active.'
           : errorText.contains(
               'already completed registration',

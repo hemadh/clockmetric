@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../main.dart';
-import '../services/report_service.dart';
 import '../theme/app_colors.dart';
 
 class WeeklyReportScreen extends StatefulWidget {
@@ -15,8 +14,12 @@ class WeeklyReportScreen extends StatefulWidget {
 class _WeeklyReportScreenState
     extends State<WeeklyReportScreen> {
   Map<String, int> employeeTotals = {};
+  Map<String, int> lifetimeEmployeeTotals = {};
   Map<String, int> projectTotals = {};
+  Map<String, Map<String, int>> projectEmployeeTotals = {};
   Map<String, Map<String, int>> employeeDailyTotals = {};
+
+  String projectSearchQuery = '';
 
   List<Map<String, dynamic>> complianceRows = [];
 
@@ -72,104 +75,320 @@ class _WeeklyReportScreenState
     });
 
     try {
-      final employeeData =
-          await ReportService().getWeeklyByEmployee();
-
-      final projectData =
-          await ReportService().getWeeklyByProject();
-
-      final weeklyEntries =
-          await ReportService().getWeeklyEntries();
-
-      final Map<String, int> newEmployeeTotals = {};
-      final Map<String, int> newProjectTotals = {};
-
-      final Map<String, Map<String, int>>
-          newDailyTotals = {};
-
-      for (final item in employeeData) {
-  final employee =
-      item['employee_name']?.toString().trim();
-
-  final employeeName =
-      employee == null || employee.isEmpty
-          ? 'Unknown Employee'
-          : employee;
-
-  final seconds = _entryDurationSeconds(item);
-
-  newEmployeeTotals[employeeName] =
-      (newEmployeeTotals[employeeName] ?? 0) +
-          seconds;
-}
-
-      for (final item in projectData) {
-  final projectName =
-      item['projects']?['project_name']
-              ?.toString()
-              .trim() ??
-          '';
-
-  final displayProject =
-      projectName.isEmpty
-          ? 'Unknown Project'
-          : projectName;
-
-  final seconds = _entryDurationSeconds(item);
-
-  newProjectTotals[displayProject] =
-      (newProjectTotals[displayProject] ?? 0) +
-          seconds;
-}
-      for (final item in weeklyEntries) {
-        final employee =
-            item['employee_name']?.toString().trim();
-
-        final employeeName =
-            employee == null || employee.isEmpty
-                ? 'Unknown Employee'
-                : employee;
-
-        final seconds = _entryDurationSeconds(item);
-
-        final startTime = DateTime.tryParse(
-          item['start_time']?.toString() ?? '',
-        )?.toLocal();
-
-        if (startTime == null) {
-          continue;
-        }
-
-        final dayName = days[startTime.weekday - 1];
-
-        newDailyTotals.putIfAbsent(
-          employeeName,
-          () => {
-            'Mon': 0,
-            'Tue': 0,
-            'Wed': 0,
-            'Thu': 0,
-            'Fri': 0,
-            'Sat': 0,
-            'Sun': 0,
-          },
-        );
-
-      newDailyTotals[employeeName]![dayName] =
-    (newDailyTotals[employeeName]![dayName] ?? 0) +
-        seconds;
-      }
-
+      // ---------------------------------------------------------
+      // EMPLOYEE PROFILES
+      // Used to resolve a real employee name from employee_id.
+      // This prevents valid time entries from showing as
+      // "Unknown Employee" when employee_name is missing.
+      // ---------------------------------------------------------
       final profiles = await supabase
           .from('profiles')
           .select(
-            'full_name, required_weekly_hours',
+            'id, full_name, required_weekly_hours',
           )
           .eq(
             'workspace_id',
             currentWorkspaceId,
           )
           .eq('role', 'employee');
+
+      final Map<String, String> profileNamesById = {};
+
+      for (final profile in profiles) {
+        final profileId =
+            profile['id']?.toString().trim() ?? '';
+
+        final fullName =
+            profile['full_name']?.toString().trim() ?? '';
+
+        if (profileId.isNotEmpty && fullName.isNotEmpty) {
+          profileNamesById[profileId] = fullName;
+        }
+      }
+
+      // ---------------------------------------------------------
+      // PROJECT MEMBERS
+      // Used as a safe fallback for old time entries where both
+      // employee_id and employee_name were not saved.
+      // If a project has exactly one assigned employee, we can
+      // safely attribute that unidentified project time to them.
+      // ---------------------------------------------------------
+      final projectRows = await supabase
+          .from('projects')
+          .select('id, project_name')
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
+          );
+
+      final projectMemberRows = await supabase
+          .from('project_members')
+          .select('project_id, employee_id')
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
+          );
+
+      final Map<String, String> projectNamesById = {};
+      final Map<String, Set<String>>
+          assignedEmployeeNamesByProjectId = {};
+
+      for (final project in projectRows) {
+        final projectId =
+            project['id']?.toString().trim() ?? '';
+
+        final projectName =
+            project['project_name']?.toString().trim() ?? '';
+
+        if (projectId.isNotEmpty && projectName.isNotEmpty) {
+          projectNamesById[projectId] = projectName;
+        }
+      }
+
+      for (final member in projectMemberRows) {
+        final projectId =
+            member['project_id']?.toString().trim() ?? '';
+
+        final employeeId =
+            member['employee_id']?.toString().trim() ?? '';
+
+        final employeeName =
+            profileNamesById[employeeId];
+
+        if (projectId.isEmpty ||
+            employeeName == null ||
+            employeeName.trim().isEmpty) {
+          continue;
+        }
+
+        assignedEmployeeNamesByProjectId.putIfAbsent(
+          projectId,
+          () => <String>{},
+        );
+
+        assignedEmployeeNamesByProjectId[projectId]!.add(
+          employeeName.trim(),
+        );
+      }
+
+      String resolveEmployeeName(
+        Map<String, dynamic> item,
+      ) {
+        final employeeId =
+            item['employee_id']?.toString().trim() ?? '';
+
+        if (employeeId.isNotEmpty) {
+          final profileName =
+              profileNamesById[employeeId];
+
+          if (profileName != null &&
+              profileName.trim().isNotEmpty) {
+            return profileName.trim();
+          }
+        }
+
+        final savedName =
+            item['employee_name']?.toString().trim() ?? '';
+
+        if (savedName.isNotEmpty &&
+            savedName.toLowerCase() !=
+                'unknown employee') {
+          return savedName;
+        }
+
+        return 'Unknown Employee';
+      }
+
+      // ---------------------------------------------------------
+      // CURRENT WEEK PROJECT + EMPLOYEE TIME
+      // Load directly from time_entries so every row contains
+      // project_id, employee_id and employee_name together.
+      // ---------------------------------------------------------
+      final current = DateTime.now();
+
+      final currentWeekStart = DateTime(
+        current.year,
+        current.month,
+        current.day,
+      ).subtract(
+        Duration(
+          days: current.weekday - DateTime.monday,
+        ),
+      );
+
+      final nextWeekStart = currentWeekStart.add(
+        const Duration(days: 7),
+      );
+
+      final projectEmployeeEntriesResponse =
+          await supabase
+              .from('time_entries')
+              .select(
+                'employee_id, employee_name, project_id, '
+                'start_time, end_time, duration_minutes, '
+                'projects(project_name)',
+              )
+              .eq(
+                'workspace_id',
+                currentWorkspaceId,
+              )
+              .gte(
+                'start_time',
+                currentWeekStart
+                    .toUtc()
+                    .toIso8601String(),
+              )
+              .lt(
+                'start_time',
+                nextWeekStart
+                    .toUtc()
+                    .toIso8601String(),
+              )
+              .order(
+                'start_time',
+                ascending: true,
+              );
+
+      final projectEmployeeEntries =
+          List<Map<String, dynamic>>.from(
+        projectEmployeeEntriesResponse,
+      );
+
+      // Load every time entry for the workspace so we can show
+      // each employee's all-time / lifetime tracked hours.
+      final lifetimeEntries = await supabase
+          .from('time_entries')
+          .select(
+            'employee_id, employee_name, start_time, '
+            'end_time, duration_minutes',
+          )
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
+          )
+          .order(
+            'start_time',
+            ascending: true,
+          );
+
+      final Map<String, int> newEmployeeTotals = {};
+      final Map<String, int> newLifetimeEmployeeTotals = {};
+      final Map<String, int> newProjectTotals = {};
+      final Map<String, Map<String, int>>
+          newProjectEmployeeTotals = {};
+
+      final Map<String, Map<String, int>>
+          newDailyTotals = {};
+
+      for (final rawItem in lifetimeEntries) {
+        final item = Map<String, dynamic>.from(rawItem);
+
+        final employeeName =
+            resolveEmployeeName(item);
+
+        final seconds = _entryDurationSeconds(item);
+
+        newLifetimeEmployeeTotals[employeeName] =
+            (newLifetimeEmployeeTotals[employeeName] ?? 0) +
+                seconds;
+      }
+
+      // ---------------------------------------------------------
+      // CURRENT WEEK AGGREGATION
+      //
+      // IMPORTANT:
+      // employee_id is the identity. profiles.full_name is only the
+      // display name. This prevents a renamed employee from appearing
+      // twice (for example "sonee" and "Sonee Acharya").
+      // ---------------------------------------------------------
+      for (final item in projectEmployeeEntries) {
+        final projectId =
+            item['project_id']?.toString().trim() ?? '';
+
+        final joinedProjectName =
+            item['projects']?['project_name']
+                    ?.toString()
+                    .trim() ??
+                '';
+
+        final projectNameFromId =
+            projectNamesById[projectId] ?? '';
+
+        final displayProject =
+            joinedProjectName.isNotEmpty
+                ? joinedProjectName
+                : projectNameFromId.isNotEmpty
+                    ? projectNameFromId
+                    : 'Unknown Project';
+
+        var employeeName =
+            resolveEmployeeName(item);
+
+        // Very old entries may not contain employee_id or employee_name.
+        // If exactly one employee is assigned to that project, safely use
+        // that employee as the only possible worker.
+        if (employeeName == 'Unknown Employee' &&
+            projectId.isNotEmpty) {
+          final assignedNames =
+              assignedEmployeeNamesByProjectId[projectId] ??
+                  <String>{};
+
+          if (assignedNames.length == 1) {
+            employeeName = assignedNames.first;
+          }
+        }
+
+        final seconds = _entryDurationSeconds(item);
+
+        // Weekly total by employee.
+        newEmployeeTotals[employeeName] =
+            (newEmployeeTotals[employeeName] ?? 0) +
+                seconds;
+
+        // Daily total by employee.
+        final startTime = DateTime.tryParse(
+          item['start_time']?.toString() ?? '',
+        )?.toLocal();
+
+        if (startTime != null) {
+          final dayName =
+              days[startTime.weekday - 1];
+
+          newDailyTotals.putIfAbsent(
+            employeeName,
+            () => {
+              'Mon': 0,
+              'Tue': 0,
+              'Wed': 0,
+              'Thu': 0,
+              'Fri': 0,
+              'Sat': 0,
+              'Sun': 0,
+            },
+          );
+
+          newDailyTotals[employeeName]![dayName] =
+              (newDailyTotals[employeeName]![dayName] ?? 0) +
+                  seconds;
+        }
+
+        // Weekly total by project.
+        newProjectTotals[displayProject] =
+            (newProjectTotals[displayProject] ?? 0) +
+                seconds;
+
+        // Weekly employee totals inside each project.
+        newProjectEmployeeTotals.putIfAbsent(
+          displayProject,
+          () => <String, int>{},
+        );
+
+        newProjectEmployeeTotals[displayProject]![employeeName] =
+            (newProjectEmployeeTotals[displayProject]![
+                        employeeName] ??
+                    0) +
+                seconds;
+      }
 
       final List<Map<String, dynamic>> compliance = [];
 
@@ -181,12 +400,17 @@ class _WeeklyReportScreenState
         final displayName =
             name.isEmpty ? 'Unnamed Employee' : name;
 
+        newLifetimeEmployeeTotals.putIfAbsent(
+          displayName,
+          () => 0,
+        );
+
         final requiredHours = int.tryParse(
               profile['required_weekly_hours']
                       ?.toString() ??
                   '',
             ) ??
-            45;
+            0;
 
         final workedMinutes =
             newEmployeeTotals[displayName] ?? 0;
@@ -230,7 +454,10 @@ class _WeeklyReportScreenState
 
       setState(() {
         employeeTotals = newEmployeeTotals;
+        lifetimeEmployeeTotals = newLifetimeEmployeeTotals;
         projectTotals = newProjectTotals;
+        projectEmployeeTotals =
+            newProjectEmployeeTotals;
         employeeDailyTotals = newDailyTotals;
         complianceRows = compliance;
         loading = false;
@@ -248,6 +475,30 @@ class _WeeklyReportScreenState
             'Unable to load weekly reports. Please try again.';
       });
     }
+  }
+
+  String _projectDisplayName(dynamic value) {
+    var name = value?.toString().trim() ?? '';
+
+    if (name.isEmpty ||
+        name.toLowerCase() == 'unknown project' ||
+        name.toLowerCase() == 'no project') {
+      return 'Project: No Project';
+    }
+
+    name = name.replaceFirst(
+      RegExp(
+        r'^project\s*:\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    if (name.trim().isEmpty) {
+      return 'Project: No Project';
+    }
+
+    return 'Project: ${name.trim()}';
   }
 
   String formatHours(int seconds) {
@@ -350,9 +601,9 @@ class _WeeklyReportScreenState
 
   Widget weeklyComplianceReport() {
     return _reportContainer(
-      title: 'Weekly Hours Compliance',
+      title: 'Employee Weekly Hours',
       subtitle:
-          'Compare worked hours against each employee’s weekly requirement.',
+          'Compare each employee’s worked hours with their weekly requirement.',
       icon: Icons.fact_check_outlined,
       child: complianceRows.isEmpty
           ? _emptySection(
@@ -570,6 +821,560 @@ class _WeeklyReportScreenState
                 ).toList(),
               ),
             ),
+    );
+  }
+
+  Future<void> _showProjectWeekPopup(
+    String projectName,
+  ) async {
+    final employees =
+        (projectEmployeeTotals[projectName] ??
+                <String, int>{})
+            .entries
+            .toList()
+          ..sort(
+            (a, b) => b.value.compareTo(a.value),
+          );
+
+    final projectTotal =
+        projectTotals[projectName] ?? 0;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          child: Container(
+            constraints: const BoxConstraints(
+              maxWidth: 620,
+              maxHeight: 600,
+            ),
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: AppColors.border,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x1A000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius:
+                            BorderRadius.circular(11),
+                      ),
+                      child: const Icon(
+                        Icons.folder_open_rounded,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _projectDisplayName(projectName),
+                            style: const TextStyle(
+                              color:
+                                  AppColors.textPrimary,
+                              fontSize: 19,
+                              fontWeight:
+                                  FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          const Text(
+                            'Employees who worked on this project this week',
+                            style: TextStyle(
+                              color: AppColors
+                                  .textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () {
+                        Navigator.of(
+                          dialogContext,
+                        ).pop();
+                      },
+                      icon: const Icon(
+                        Icons.close_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 18),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius:
+                        BorderRadius.circular(10),
+                  ),
+                  child: const Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'EMPLOYEE',
+                          style: TextStyle(
+                            color: AppColors
+                                .textSecondary,
+                            fontSize: 11,
+                            fontWeight:
+                                FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 140,
+                        child: Text(
+                          'WEEK TIME',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            color: AppColors
+                                .textSecondary,
+                            fontSize: 11,
+                            fontWeight:
+                                FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Flexible(
+                  child: employees.isEmpty
+                      ? const Padding(
+                          padding:
+                              EdgeInsets.symmetric(
+                            vertical: 36,
+                          ),
+                          child: Center(
+                            child: Text(
+                              'No employee time recorded this week.',
+                              style: TextStyle(
+                                color: AppColors
+                                    .textSecondary,
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount:
+                              employees.length,
+                          separatorBuilder:
+                              (_, __) =>
+                                  const Divider(
+                            height: 1,
+                            color: AppColors.border,
+                          ),
+                          itemBuilder:
+                              (context, index) {
+                            final employee =
+                                employees[index];
+
+                            final isUnknown =
+                                employee.key ==
+                                    'Unknown Employee';
+
+                            return Padding(
+                              padding:
+                                  const EdgeInsets
+                                      .symmetric(
+                                horizontal: 6,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 16,
+                                    backgroundColor:
+                                        AppColors
+                                            .primaryLight,
+                                    child: Text(
+                                      _initials(
+                                        employee.key,
+                                      ),
+                                      style:
+                                          const TextStyle(
+                                        color: AppColors
+                                            .primaryDark,
+                                        fontSize: 9,
+                                        fontWeight:
+                                            FontWeight
+                                                .bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: 10,
+                                  ),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment
+                                              .start,
+                                      children: [
+                                        Text(
+                                          employee.key,
+                                          style:
+                                              const TextStyle(
+                                            color: AppColors
+                                                .textPrimary,
+                                            fontWeight:
+                                                FontWeight
+                                                    .w600,
+                                          ),
+                                        ),
+                                        if (isUnknown)
+                                          const Padding(
+                                            padding:
+                                                EdgeInsets.only(
+                                              top: 2,
+                                            ),
+                                            child: Text(
+                                              'Employee details were not saved on this older time entry.',
+                                              style:
+                                                  TextStyle(
+                                                color: AppColors
+                                                    .textSecondary,
+                                                fontSize: 10,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 140,
+                                    child: Text(
+                                      formatHours(
+                                        employee.value,
+                                      ),
+                                      textAlign:
+                                          TextAlign.right,
+                                      style:
+                                          const TextStyle(
+                                        color: AppColors
+                                            .primary,
+                                        fontWeight:
+                                            FontWeight
+                                                .bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+
+                const SizedBox(height: 12),
+                const Divider(
+                  color: AppColors.border,
+                ),
+                const SizedBox(height: 8),
+
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'Project total this week',
+                      style: TextStyle(
+                        color:
+                            AppColors.textSecondary,
+                        fontWeight:
+                            FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Text(
+                      formatHours(projectTotal),
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontSize: 17,
+                        fontWeight:
+                            FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget projectEmployeeReport() {
+    final query =
+        projectSearchQuery.trim().toLowerCase();
+
+    final sortedProjects =
+        projectTotals.entries.where((entry) {
+      if (query.isEmpty) {
+        return true;
+      }
+
+      final projectMatches =
+          entry.key.toLowerCase().contains(query);
+
+      final employees =
+          projectEmployeeTotals[entry.key] ??
+              <String, int>{};
+
+      final employeeMatches =
+          employees.keys.any(
+        (name) =>
+            name.toLowerCase().contains(query),
+      );
+
+      return projectMatches || employeeMatches;
+    }).toList()
+      ..sort(
+        (a, b) => b.value.compareTo(a.value),
+      );
+
+    return _reportContainer(
+      title: 'Weekly Hours by Project',
+      subtitle:
+          'Click a project to see who worked on it and how much time they invested this week.',
+      icon: Icons.folder_copy_outlined,
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          TextField(
+            onChanged: (value) {
+              setState(() {
+                projectSearchQuery = value;
+              });
+            },
+            decoration: InputDecoration(
+              hintText:
+                  'Search project or employee...',
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+              ),
+              filled: true,
+              fillColor: AppColors.background,
+              contentPadding:
+                  const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: AppColors.border,
+                ),
+              ),
+              enabledBorder:
+                  OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: AppColors.border,
+                ),
+              ),
+              focusedBorder:
+                  OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          if (sortedProjects.isEmpty)
+            _emptySection(
+              projectTotals.isEmpty
+                  ? 'No project time data available.'
+                  : 'No matching project or employee found.',
+            )
+          else
+            ...sortedProjects.map(
+              (projectEntry) {
+                final employees =
+                    projectEmployeeTotals[
+                            projectEntry.key] ??
+                        <String, int>{};
+
+                final employeeCount =
+                    employees.length;
+
+                return Padding(
+                  padding:
+                      const EdgeInsets.only(
+                    bottom: 10,
+                  ),
+                  child: Material(
+                    color:
+                        AppColors.background,
+                    borderRadius:
+                        BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius:
+                          BorderRadius.circular(
+                        12,
+                      ),
+                      onTap: () {
+                        _showProjectWeekPopup(
+                          projectEntry.key,
+                        );
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        padding:
+                            const EdgeInsets
+                                .symmetric(
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
+                        decoration:
+                            BoxDecoration(
+                          borderRadius:
+                              BorderRadius.circular(
+                            12,
+                          ),
+                          border: Border.all(
+                            color:
+                                AppColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration:
+                                  BoxDecoration(
+                                color: AppColors
+                                    .primaryLight,
+                                borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                  9,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons
+                                    .folder_outlined,
+                                color: AppColors
+                                    .primary,
+                                size: 19,
+                              ),
+                            ),
+                            const SizedBox(
+                              width: 11,
+                            ),
+                            Expanded(
+                              child: Text(
+                                _projectDisplayName(
+                                  projectEntry.key,
+                                ),
+                                style:
+                                    const TextStyle(
+                                  color: AppColors
+                                      .textPrimary,
+                                  fontSize: 15,
+                                  fontWeight:
+                                      FontWeight
+                                          .w700,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '$employeeCount '
+                              '${employeeCount == 1 ? 'employee' : 'employees'}',
+                              style:
+                                  const TextStyle(
+                                color: AppColors
+                                    .textSecondary,
+                                fontSize: 12,
+                                fontWeight:
+                                    FontWeight
+                                        .w600,
+                              ),
+                            ),
+                            const SizedBox(
+                              width: 24,
+                            ),
+                            Text(
+                              formatHours(
+                                projectEntry.value,
+                              ),
+                              style:
+                                  const TextStyle(
+                                color: AppColors
+                                    .primary,
+                                fontWeight:
+                                    FontWeight
+                                        .bold,
+                              ),
+                            ),
+                            const SizedBox(
+                              width: 8,
+                            ),
+                            const Icon(
+                              Icons
+                                  .chevron_right_rounded,
+                              color: AppColors
+                                  .textSecondary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 
@@ -1012,25 +1817,16 @@ class _WeeklyReportScreenState
                             const SizedBox(height: 16),
                             reportSection(
                               title:
-                                  'Weekly Hours by Employee',
+                                  'Employee Lifetime Hours',
                               subtitle:
-                                  'Total tracked time for each employee.',
+                                  'Total tracked time from each employee’s first recorded session until now.',
                               firstColumn: 'Employee',
-                              data: employeeTotals,
+                              data: lifetimeEmployeeTotals,
                               icon:
-                                  Icons.people_alt_outlined,
+                                  Icons.history_rounded,
                             ),
                             const SizedBox(height: 16),
-                            reportSection(
-                              title:
-                                  'Weekly Hours by Project',
-                              subtitle:
-                                  'Total tracked time grouped by project.',
-                              firstColumn: 'Project',
-                              data: projectTotals,
-                              icon:
-                                  Icons.folder_copy_outlined,
-                            ),
+                            projectEmployeeReport(),
                             const SizedBox(height: 18),
                           ],
                         ),

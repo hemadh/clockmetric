@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/session_timeout_service.dart';
 
+import 'billing_screen.dart';
 import 'change_password_screen.dart';
 import 'employee_management_screen.dart';
 import 'leave_approval_screen.dart';
@@ -19,9 +20,27 @@ import 'weekly_report_screen.dart';
 import 'workspace_screen.dart';
 import '../services/update_service.dart';
 import '../services/time_entry_service.dart';
-import 'billing_screen.dart';
+import '../services/timer_safety_service.dart';
+import '../widgets/dashboard/admin_weekly_overview.dart';
+import 'ai_summary_screen.dart';
 
 import '../widgets/dashboard/dashboard_sidebar.dart';
+
+class _MutableAdminEmployeeWeekSummary {
+  final String employeeId;
+  String employeeName;
+  Duration thisWeek;
+  Duration previousWeek;
+  bool isWorking;
+
+  _MutableAdminEmployeeWeekSummary({
+    required this.employeeId,
+    required this.employeeName,
+    this.thisWeek = Duration.zero,
+    this.previousWeek = Duration.zero,
+    this.isWorking = false,
+  });
+}
 
 class DashboardV2Screen extends StatefulWidget {
   const DashboardV2Screen({super.key});
@@ -46,17 +65,15 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   Timer? clockTimer;
 
   List<Map<String, dynamic>> weekEntries = [];
+  List<Map<String, dynamic>> previousWeekEntries = [];
   Map<String, dynamic>? runningEntry;
+  Map<String, String> employeeNamesById = {};
 
   final Set<String> expandedDateGroups = <String>{};
   final Set<String> expandedEmployeeGroups = <String>{};
 
 
-  String selectedPage =
-    workspaceTrialExpired &&
-            currentUserRole.trim().toLowerCase() == 'admin'
-        ? 'billing'
-        : 'dashboard';
+  String selectedPage = 'dashboard';
   bool sidebarCollapsed = false;
 
   bool get isAdmin =>
@@ -79,6 +96,9 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
   DateTime get nextWeekStart =>
       weekStart.add(const Duration(days: 7));
 
+  DateTime get previousWeekStart =>
+      weekStart.subtract(const Duration(days: 7));
+
   @override
   void initState() {
     super.initState();
@@ -86,7 +106,14 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
 });
 
-    SessionTimeoutService.instance.start(handleSessionTimeout);
+    // Inactivity logout is intentionally disabled.
+    // Timer safety is handled separately.
+    TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .addListener(
+          _handleForcedTimerStop,
+        );
 
     loadDashboard();
 
@@ -104,52 +131,90 @@ class _DashboardV2ScreenState extends State<DashboardV2Screen> {
 
   @override
   void dispose() {
+    TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .removeListener(
+          _handleForcedTimerStop,
+        );
+
     clockTimer?.cancel();
     SessionTimeoutService.instance.stop();
     super.dispose();
   }
 
   void resetSessionTimer() {
-  SessionTimeoutService.instance.reset(handleSessionTimeout);
-}
-
-Future<void> handleSessionTimeout() async {
-  try {
-    final activeEntry =
-        await TimeEntryService().getRunningEntry();
-
-    if (activeEntry != null) {
-      if (!mounted) return;
-
-      SessionTimeoutService.instance.reset(
-        handleSessionTimeout,
-      );
-
-      debugPrint(
-        'Session timeout skipped because a timer is running.',
-      );
-
-      return;
-    }
-  } catch (error) {
-    debugPrint(
-      'Session timeout running-entry check failed: $error',
-    );
-
-    if (mounted) {
-      SessionTimeoutService.instance.reset(
-        handleSessionTimeout,
-      );
-    }
-
-    return;
+    // Inactivity logout is disabled.
   }
 
-  await logout();
-}
+  void _handleForcedTimerStop() {
+    final event = TimerSafetyService
+        .instance
+        .forcedStopNotifier
+        .value;
+
+    if (event == null || isAdmin || !mounted) {
+      return;
+    }
+
+    final entryIndex = weekEntries.indexWhere(
+      (entry) =>
+          entry['id']?.toString() ==
+          event.entryId,
+    );
+
+    if (entryIndex >= 0) {
+      final existing =
+          Map<String, dynamic>.from(
+        weekEntries[entryIndex],
+      );
+
+      final start = DateTime.tryParse(
+        existing['start_time']?.toString() ?? '',
+      )?.toLocal();
+
+      final stoppedAtLocal =
+          event.stoppedAt.toLocal();
+
+      final durationMinutes = start == null
+          ? 0
+          : stoppedAtLocal
+              .difference(start)
+              .inMinutes;
+
+      // Keep the dashboard's local copy in the same wall-clock time
+      // that the employee sees. Converting this to UTC was what created
+      // rows such as 17:02 -> 12:03 on the dashboard.
+      existing['end_time'] =
+          stoppedAtLocal.toIso8601String();
+
+      existing['duration_minutes'] =
+          durationMinutes < 0
+              ? 0
+              : durationMinutes;
+
+      weekEntries[entryIndex] = existing;
+    }
+
+    setState(() {
+      if (runningEntry?['id']?.toString() ==
+          event.entryId) {
+        runningEntry = null;
+      }
+
+      now = event.stoppedAt;
+    });
+  }
 
   Future<void> logout() async {
     SessionTimeoutService.instance.stop();
+
+    await TimerSafetyService.instance
+        .stopBeforeLogout(
+      userId: currentUserId,
+      workspaceId: currentWorkspaceId,
+      reason: TimerAutoStopReason.logout,
+    );
 
     await supabase.auth.signOut();
 
@@ -169,78 +234,211 @@ Future<void> handleSessionTimeout() async {
       (route) => false,
     );
   }
+Future<void> loadDashboard() async {
+  if (!mounted) return;
 
-  Future<void> loadDashboard() async {
-    if (!mounted) return;
+  setState(() {
+    loading = true;
+    errorMessage = null;
+  });
 
-    setState(() {
-      loading = true;
-      errorMessage = null;
-    });
+  try {
+    // ---------------------------------------------------------
+    // 1. LOAD THIS WEEK'S ENTRIES
+    // ---------------------------------------------------------
+    var query = supabase
+        .from('time_entries')
+        .select(
+          'id, employee_id, employee_name, project_id, '
+          'start_time, end_time, duration_minutes, note, '
+          'projects(project_name)',
+        )
+        .eq('workspace_id', currentWorkspaceId)
+        .gte(
+          'start_time',
+          weekStart.toUtc().toIso8601String(),
+        )
+        .lt(
+          'start_time',
+          nextWeekStart.toUtc().toIso8601String(),
+        );
 
-    try {
-      var query = supabase
+    if (!isAdmin) {
+      query = query.eq(
+        'employee_id',
+        currentUserId,
+      );
+    }
+
+    final response = await query.order(
+      'start_time',
+      ascending: false,
+    );
+
+    final entries =
+        List<Map<String, dynamic>>.from(response);
+
+final profilesResponse = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('workspace_id', currentWorkspaceId);
+
+final profiles =
+    List<Map<String, dynamic>>.from(
+  profilesResponse,
+);
+
+final namesById = <String, String>{};
+
+for (final profile in profiles) {
+  final id =
+      profile['id']?.toString().trim() ?? '';
+
+  final name =
+      profile['full_name']?.toString().trim() ?? '';
+
+  if (id.isNotEmpty && name.isNotEmpty) {
+    namesById[id] = name;
+  }
+}
+
+    // ---------------------------------------------------------
+    // 2. ADMIN ONLY: LOAD THE PREVIOUS WEEK
+    //    This is used by the admin comparison card. Employees
+    //    keep the existing dashboard and do not need this query.
+    // ---------------------------------------------------------
+    List<Map<String, dynamic>> previousEntries = [];
+
+    if (isAdmin) {
+      final previousResponse = await supabase
           .from('time_entries')
           .select(
             'id, employee_id, employee_name, project_id, '
             'start_time, end_time, duration_minutes, note, '
             'projects(project_name)',
           )
-          .eq('workspace_id', currentWorkspaceId)
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
+          )
           .gte(
             'start_time',
-            weekStart.toIso8601String(),
+            previousWeekStart.toUtc().toIso8601String(),
           )
           .lt(
             'start_time',
-            nextWeekStart.toIso8601String(),
+            weekStart.toUtc().toIso8601String(),
+          )
+          .order(
+            'start_time',
+            ascending: false,
           );
 
-      if (!isAdmin) {
-        query = query.eq(
-          'employee_id',
-          currentUserId,
-        );
-      }
+      previousEntries =
+          List<Map<String, dynamic>>.from(previousResponse);
+    }
 
-      final response = await query.order(
-        'start_time',
-        ascending: false,
+    // ---------------------------------------------------------
+    // 3. LOAD RUNNING TIMER SEPARATELY
+    //    IMPORTANT:
+    //    Do NOT depend on the weekly query to find it.
+    // ---------------------------------------------------------
+    Map<String, dynamic>? active;
+
+    if (!isAdmin) {
+      final runningResponse = await supabase
+          .from('time_entries')
+          .select(
+            'id, employee_id, employee_name, project_id, '
+            'start_time, end_time, duration_minutes, note, '
+            'projects(project_name)',
+          )
+          .eq(
+            'workspace_id',
+            currentWorkspaceId,
+          )
+          .eq(
+            'employee_id',
+            currentUserId,
+          )
+          .isFilter(
+            'end_time',
+            null,
+          )
+          .order(
+            'start_time',
+            ascending: false,
+          )
+          .limit(1);
+
+      final runningList =
+          List<Map<String, dynamic>>.from(
+        runningResponse,
       );
 
-      final entries =
-          List<Map<String, dynamic>>.from(response);
+      if (runningList.isNotEmpty) {
+        active = runningList.first;
 
-      Map<String, dynamic>? active;
+        // -----------------------------------------------------
+        // Make sure the running entry also exists in weekEntries
+        // so TODAY + THIS WEEK TOTAL update immediately.
+        // -----------------------------------------------------
+        final activeId =
+            active['id']?.toString();
 
+        final alreadyExists = entries.any(
+          (entry) =>
+              entry['id']?.toString() == activeId,
+        );
+
+        if (!alreadyExists) {
+          entries.insert(0, active);
+        }
+      }
+    } else {
+      // Admin dashboard can still identify active employee rows
+      // for Working / Offline status.
       for (final entry in entries) {
         if (entry['end_time'] == null) {
           active ??= entry;
         }
       }
-
-      if (!mounted) return;
-
-      setState(() {
-        weekEntries = entries;
-        runningEntry = active;
-        loading = false;
-
-        final todayKey = _dateKey(DateTime.now());
-        expandedDateGroups.add(todayKey);
-      });
-    } catch (error) {
-      debugPrint('Dashboard load error: $error');
-
-      if (!mounted) return;
-
-      setState(() {
-        loading = false;
-        errorMessage =
-            'Unable to load this week’s time entries.';
-      });
     }
+
+    if (!mounted) return;
+
+    setState(() {
+      weekEntries = entries;
+      previousWeekEntries = previousEntries;
+      employeeNamesById = namesById;
+
+      // Employee gets their own running timer.
+      // Admin does not need the employee-style timer card.
+      runningEntry = isAdmin ? null : active;
+
+      loading = false;
+      now = DateTime.now();
+
+      final todayKey = _dateKey(
+        DateTime.now(),
+      );
+
+      expandedDateGroups.add(todayKey);
+    });
+  } catch (error) {
+    debugPrint(
+      'Dashboard load error: $error',
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      loading = false;
+      errorMessage =
+          'Unable to load this week’s time entries.';
+    });
   }
+}
 
   DateTime? _parseLocalDate(dynamic value) {
     if (value == null) return null;
@@ -248,6 +446,68 @@ Future<void> handleSessionTimeout() async {
     return DateTime.tryParse(
       value.toString(),
     )?.toLocal();
+  }
+
+  DateTime? _resolvedEntryEnd(
+    Map<String, dynamic> entry,
+    DateTime start,
+  ) {
+    final storedEnd = _parseLocalDate(
+      entry['end_time'],
+    );
+
+    if (storedEnd == null) {
+      return null;
+    }
+
+    if (!storedEnd.isBefore(start)) {
+      return storedEnd;
+    }
+
+    /*
+     * Older automatic-stop rows were written using UTC wall-clock values
+     * into a local timestamp column. Example:
+     *   real 17:47:15 became stored/displayed around 12:02:15.
+     *
+     * Reinterpret those wall-clock components as UTC and convert them
+     * back to local time. This preserves the SECONDS too, so Dashboard
+     * and Timesheet can match exactly instead of losing ~45 minutes.
+     */
+    final correctedEnd = DateTime.utc(
+      storedEnd.year,
+      storedEnd.month,
+      storedEnd.day,
+      storedEnd.hour,
+      storedEnd.minute,
+      storedEnd.second,
+      storedEnd.millisecond,
+      storedEnd.microsecond,
+    ).toLocal();
+
+    final correctedDuration =
+        correctedEnd.difference(start);
+
+    if (!correctedEnd.isBefore(start) &&
+        correctedDuration <= const Duration(hours: 24)) {
+      return correctedEnd;
+    }
+
+    /*
+     * Final fallback for very old rows where only duration_minutes
+     * is trustworthy. This can only preserve whole minutes.
+     */
+    final storedMinutes = int.tryParse(
+          entry['duration_minutes']?.toString() ?? '',
+        ) ??
+        0;
+
+    if (storedMinutes > 0) {
+      return start.add(
+        Duration(minutes: storedMinutes),
+      );
+    }
+
+    return storedEnd;
   }
 
   Duration _entryDuration(
@@ -261,31 +521,212 @@ Future<void> handleSessionTimeout() async {
       return Duration.zero;
     }
 
-    final storedEnd = _parseLocalDate(
-      entry['end_time'],
+    // Running entry: calculate live duration.
+    if (entry['end_time'] == null) {
+      final liveDuration = now.difference(start);
+
+      return liveDuration.isNegative
+          ? Duration.zero
+          : liveDuration;
+    }
+
+    final end = _resolvedEntryEnd(
+      entry,
+      start,
     );
 
-    final end = storedEnd ?? now;
-
-    if (end.isBefore(start)) {
+    if (end == null || end.isBefore(start)) {
       return Duration.zero;
     }
 
-    final duration = end.difference(start);
+    final calculated = end.difference(start);
 
-    return duration;
+    if (calculated > const Duration(hours: 24)) {
+      return Duration.zero;
+    }
+
+    return calculated;
+  }
+
+  String _entryEndText(
+    Map<String, dynamic> entry,
+  ) {
+    if (entry['end_time'] == null) {
+      return 'Running';
+    }
+
+    final start = _parseLocalDate(
+      entry['start_time'],
+    );
+
+    if (start == null) {
+      return formatEntryTime(
+        entry['end_time'],
+      );
+    }
+
+    final end = _resolvedEntryEnd(
+      entry,
+      start,
+    );
+
+    if (end == null) {
+      return '--:--';
+    }
+
+    return formatEntryTime(end);
   }
 
   Duration get thisWeekDuration {
     Duration total = Duration.zero;
 
     for (final entry in weekEntries) {
-      total += Duration(
-  seconds: _entryDuration(entry).inSeconds,
-);
+      total += _entryDuration(entry);
     }
 
     return total;
+  }
+
+
+  String _projectDisplayName(dynamic value) {
+    var name = value?.toString().trim() ?? '';
+
+    if (name.isEmpty ||
+        name.toLowerCase() == 'no project' ||
+        name.toLowerCase() == 'unknown project') {
+      return 'Project: No Project';
+    }
+
+    name = name.replaceFirst(
+      RegExp(
+        r'^project\s*:\s*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    if (name.trim().isEmpty) {
+      return 'Project: No Project';
+    }
+
+    return 'Project: ${name.trim()}';
+  }
+
+  String _employeeDisplayName(
+  Map<String, dynamic> entry,
+) {
+  final employeeId =
+      entry['employee_id']?.toString().trim() ?? '';
+
+  final currentProfileName =
+      employeeNamesById[employeeId]?.trim() ?? '';
+
+  if (currentProfileName.isNotEmpty) {
+    return currentProfileName;
+  }
+
+  final savedName =
+      entry['employee_name']?.toString().trim() ?? '';
+
+  if (savedName.isNotEmpty) {
+    return savedName;
+  }
+
+  if (employeeId == currentUserId &&
+      currentUserName.trim().isNotEmpty) {
+    return currentUserName.trim();
+  }
+
+  return 'Unknown Employee';
+}
+
+
+  List<AdminEmployeeWeekSummary> get adminEmployeeWeekSummaries {
+    final summaries =
+        <String, _MutableAdminEmployeeWeekSummary>{};
+
+    void addEntries(
+      List<Map<String, dynamic>> entries, {
+      required bool currentWeek,
+    }) {
+      for (final entry in entries) {
+        final employeeId =
+            entry['employee_id']?.toString().trim() ?? '';
+
+        final employeeName =
+    _employeeDisplayName(entry);
+
+        // Prefer employee_id so two employees with the same name
+        // are not merged. Fall back to the name for older rows.
+        final key = employeeId.isNotEmpty
+            ? employeeId
+            : 'name:${employeeName.toLowerCase()}';
+
+        final summary = summaries.putIfAbsent(
+          key,
+          () => _MutableAdminEmployeeWeekSummary(
+            employeeId: employeeId,
+            employeeName: employeeName,
+          ),
+        );
+
+        if (summary.employeeName == 'Unknown Employee' &&
+            employeeName != 'Unknown Employee') {
+          summary.employeeName = employeeName;
+        }
+
+        final duration = _entryDuration(entry);
+
+        if (currentWeek) {
+          summary.thisWeek += duration;
+
+          if (entry['end_time'] == null) {
+            summary.isWorking = true;
+          }
+        } else {
+          summary.previousWeek += duration;
+        }
+      }
+    }
+
+    addEntries(
+      weekEntries,
+      currentWeek: true,
+    );
+
+    addEntries(
+      previousWeekEntries,
+      currentWeek: false,
+    );
+
+    final result = summaries.values
+        .map(
+          (item) => AdminEmployeeWeekSummary(
+            employeeId: item.employeeId,
+            employeeName: item.employeeName,
+            thisWeek: item.thisWeek,
+            previousWeek: item.previousWeek,
+            isWorking: item.isWorking,
+          ),
+        )
+        .toList();
+
+    result.sort((a, b) {
+      final byCurrent =
+          b.thisWeek.compareTo(a.thisWeek);
+
+      if (byCurrent != 0) {
+        return byCurrent;
+      }
+
+      return a.employeeName
+          .toLowerCase()
+          .compareTo(
+            b.employeeName.toLowerCase(),
+          );
+    });
+
+    return result;
   }
 
   String _dateKey(DateTime date) {
@@ -334,7 +775,7 @@ Future<void> handleSessionTimeout() async {
 
   for (final entry in entries) {
     final employee =
-        entry['employee_name']?.toString() ?? 'Employee';
+    _employeeDisplayName(entry);
 
     groups.putIfAbsent(employee, () => []);
     groups[employee]!.add(entry);
@@ -349,9 +790,7 @@ Future<void> handleSessionTimeout() async {
     Duration total = Duration.zero;
 
     for (final entry in entries) {
-      total += Duration(
-  seconds: _entryDuration(entry).inSeconds,
-);
+      total += _entryDuration(entry);
     }
 
     return total;
@@ -495,80 +934,400 @@ Future<void> handleSessionTimeout() async {
     return '$hour:$minute $suffix';
   }
 
-  Widget buildHeader() {
+Widget buildHeader() {
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(
+      horizontal: 24,
+      vertical: 16,
+    ),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF8F1),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(
+        color: const Color(0xFFFED7AA),
+      ),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${greeting()}, $currentUserName 👋',
+                style: const TextStyle(
+                  fontSize: 25,
+                  fontWeight: FontWeight.w800,
+                  color: darkText,
+                ),
+              ),
+
+              const SizedBox(height: 5),
+
+              Text(
+                currentWorkspaceName,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: secondaryText,
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _headerPill(
+                    Icons.calendar_today_outlined,
+                    dateText(),
+                  ),
+                  _headerPill(
+                    Icons.access_time,
+                    timeText(),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // ADMIN EMPLOYEE STATUS
+        if (isAdmin &&
+    adminEmployeeWeekSummaries.isNotEmpty) ...[
+  ConstrainedBox(
+    constraints: const BoxConstraints(
+      maxWidth: 560,
+    ),
+    child: Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        ...adminEmployeeWeekSummaries
+            .take(2)
+            .map(
+              (employee) => _employeeStatusItem(
+                employeeName: employee.employeeName,
+                isWorking: employee.isWorking,
+              ),
+            ),
+
+        if (adminEmployeeWeekSummaries.length > 2)
+          _moreEmployeesButton(),
+      ],
+    ),
+  ),
+
+  const SizedBox(width: 18),
+],
+
+        // ADMIN AVATAR
+        CircleAvatar(
+          radius: 28,
+          backgroundColor: orange,
+          child: Text(
+            currentUserName.isNotEmpty
+                ? currentUserName[0].toUpperCase()
+                : 'U',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 21,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+  Widget _employeeStatusItem({
+    required String employeeName,
+    required bool isWorking,
+  }) {
+    final statusColor = isWorking
+        ? const Color(0xFF22C55E)
+        : const Color(0xFFEF4444);
+
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.symmetric(
-        horizontal: 30,
-        vertical: 25,
+        horizontal: 13,
+        vertical: 9,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8F1),
-        borderRadius: BorderRadius.circular(22),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: const Color(0xFFFED7AA),
+          color: borderColor,
         ),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${greeting()}, $currentUserName 👋',
-                  style: const TextStyle(
-                    fontSize: 29,
-                    fontWeight: FontWeight.w800,
-                    color: darkText,
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Text(
-                  currentWorkspaceName,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    color: secondaryText,
-                  ),
-                ),
-                const SizedBox(height: 17),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _headerPill(
-                      Icons.calendar_today_outlined,
-                      dateText(),
-                    ),
-                    _headerPill(
-                      Icons.access_time,
-                      timeText(),
-                    ),
-                  ],
-                ),
-              ],
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
             ),
           ),
+          const SizedBox(width: 10),
           CircleAvatar(
-            radius: 34,
-            backgroundColor: orange,
+            radius: 20,
+            backgroundColor: const Color(0xFFFFE8D5),
             child: Text(
-              currentUserName.isNotEmpty
-                  ? currentUserName[0].toUpperCase()
-                  : 'U',
+              employeeName.isNotEmpty
+                  ? employeeName[0].toUpperCase()
+                  : '?',
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 25,
-                fontWeight: FontWeight.bold,
+                color: orange,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
               ),
             ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 140,
+                ),
+                child: Text(
+                  employeeName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: darkText,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                isWorking ? 'Working' : 'Offline',
+                style: TextStyle(
+                  color: statusColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+Widget _moreEmployeesButton() {
+  final remaining =
+      adminEmployeeWeekSummaries.length - 2;
 
+  return PopupMenuButton<void>(
+    tooltip: 'View all employees',
+
+    offset: const Offset(0, 48),
+
+    color: Colors.white,
+
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    ),
+
+    itemBuilder: (context) {
+      return [
+        PopupMenuItem<void>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: SizedBox(
+            width: 340,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'TEAM STATUS',
+                    style: TextStyle(
+                      color: darkText,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  Text(
+                    '${adminEmployeeWeekSummaries.length} employees',
+                    style: const TextStyle(
+                      color: secondaryText,
+                      fontSize: 12,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  const Divider(height: 1),
+
+                  const SizedBox(height: 8),
+
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxHeight: 340,
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children:
+                            adminEmployeeWeekSummaries
+                                .map((employee) {
+                          final statusColor =
+                              employee.isWorking
+                                  ? const Color(
+                                      0xFF22C55E,
+                                    )
+                                  : const Color(
+                                      0xFFEF4444,
+                                    );
+
+                          return Padding(
+                            padding:
+                                const EdgeInsets.symmetric(
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 9,
+                                  height: 9,
+                                  decoration:
+                                      BoxDecoration(
+                                    color:
+                                        statusColor,
+                                    shape:
+                                        BoxShape.circle,
+                                  ),
+                                ),
+
+                                const SizedBox(
+                                  width: 10,
+                                ),
+
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor:
+                                      const Color(
+                                    0xFFFFE8D5,
+                                  ),
+                                  child: Text(
+                                    employee.employeeName
+                                            .isNotEmpty
+                                        ? employee
+                                            .employeeName[0]
+                                            .toUpperCase()
+                                        : '?',
+                                    style:
+                                        const TextStyle(
+                                      color: orange,
+                                      fontSize: 13,
+                                      fontWeight:
+                                          FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(
+                                  width: 10,
+                                ),
+
+                                Expanded(
+                                  child: Text(
+                                    employee.employeeName,
+                                    overflow:
+                                        TextOverflow
+                                            .ellipsis,
+                                    style:
+                                        const TextStyle(
+                                      color: darkText,
+                                      fontSize: 13,
+                                      fontWeight:
+                                          FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(
+                                  width: 10,
+                                ),
+
+                                Text(
+                                  employee.isWorking
+                                      ? 'Working'
+                                      : 'Offline',
+                                  style: TextStyle(
+                                    color:
+                                        statusColor,
+                                    fontSize: 12,
+                                    fontWeight:
+                                        FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ];
+    },
+
+    child: Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 15,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.groups_outlined,
+            color: orange,
+            size: 18,
+          ),
+
+          const SizedBox(width: 7),
+
+          Text(
+            '+$remaining more',
+            style: const TextStyle(
+              color: orange,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
   Widget _headerPill(
     IconData icon,
     String text,
@@ -613,13 +1372,12 @@ Future<void> handleSessionTimeout() async {
 
     final entry = runningEntry!;
 
-    final project =
-        entry['projects']?['project_name']?.toString() ??
-            'No Project';
+    final project = _projectDisplayName(
+      entry['projects']?['project_name'],
+    );
 
     final employee =
-        entry['employee_name']?.toString() ??
-            currentUserName;
+    _employeeDisplayName(entry);
 
     return Container(
       width: double.infinity,
@@ -682,17 +1440,15 @@ Future<void> handleSessionTimeout() async {
               fontWeight: FontWeight.bold,
             ),
           ),
-          if (!isAdmin) ...[
-  const SizedBox(width: 18),
-  FilledButton(
-    style: FilledButton.styleFrom(
-      backgroundColor: orange,
-      foregroundColor: Colors.white,
-    ),
-    onPressed: openTimerScreen,
-    child: const Text('Open Timer'),
-  ),
-],
+          const SizedBox(width: 18),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: orange,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: openTimerScreen,
+            child: const Text('Open Timer'),
+          ),
         ],
       ),
     );
@@ -1014,9 +1770,9 @@ Future<void> deleteTimeEntry(
     return;
   }
 
-  final projectName =
-      entry['projects']?['project_name']?.toString() ??
-          'No Project';
+  final projectName = _projectDisplayName(
+    entry['projects']?['project_name'],
+  );
 
   final duration = _entryDuration(entry);
 
@@ -1029,7 +1785,7 @@ Future<void> deleteTimeEntry(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Project: $projectName'),
+            Text(projectName),
             const SizedBox(height: 8),
             Text(
               'Duration: ${formatClockDuration(duration)}',
@@ -1160,18 +1916,12 @@ Future<void> continueTimeEntry(
  Widget buildTimeEntryRow(
   Map<String, dynamic> entry,
 ) {
-  final project =
-      entry['projects']?['project_name']?.toString() ??
-          'No Project';
+  final project = _projectDisplayName(
+    entry['projects']?['project_name'],
+  );
 
-  final savedEmployeeName =
-      entry['employee_name']?.toString().trim() ?? '';
-
-  final employee = savedEmployeeName.isNotEmpty
-      ? savedEmployeeName
-      : entry['employee_id']?.toString() == currentUserId
-          ? currentUserName
-          : 'Unknown Employee';
+  final employee =
+    _employeeDisplayName(entry);
 
   final note =
       entry['note']?.toString().trim() ?? '';
@@ -1179,9 +1929,7 @@ Future<void> continueTimeEntry(
   final start =
       formatEntryTime(entry['start_time']);
 
-  final end = entry['end_time'] == null
-      ? 'Running'
-      : formatEntryTime(entry['end_time']);
+  final end = _entryEndText(entry);
 
   final duration = _entryDuration(entry);
 
@@ -1277,40 +2025,38 @@ if (entry['end_time'] != null) ...[
   deleteTimeEntry(entry);
 }
     },
-   itemBuilder: (context) {
-  return [
-    if (!isAdmin)
-      const PopupMenuItem<String>(
-        value: 'continue',
-        child: Row(
-          children: [
-            Icon(Icons.play_arrow_outlined),
-            SizedBox(width: 10),
-            Text('Continue'),
-          ],
+    itemBuilder: (context) {
+      return const [
+        PopupMenuItem<String>(
+          value: 'continue',
+          child: Row(
+            children: [
+              Icon(Icons.play_arrow_outlined),
+              SizedBox(width: 10),
+              Text('Continue'),
+            ],
+          ),
         ),
-      ),
-
-    const PopupMenuItem<String>(
-      value: 'delete',
-      child: Row(
-        children: [
-          Icon(
-            Icons.delete_outline,
-            color: Colors.red,
+        PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                color: Colors.red,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Delete',
+                style: TextStyle(
+                  color: Colors.red,
+                ),
+              ),
+            ],
           ),
-          SizedBox(width: 10),
-          Text(
-            'Delete',
-            style: TextStyle(
-              color: Colors.red,
-            ),
-          ),
-        ],
-      ),
-    ),
-  ];
-},
+        ),
+      ];
+    },
   ),
 ],
       ],
@@ -1319,12 +2065,17 @@ if (entry['end_time'] != null) ...[
 }
 
   void openTimerScreen() {
-  resetSessionTimer();
+    resetSessionTimer();
 
-  setState(() {
-    selectedPage = 'timer';
-  });
-}
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TimerScreen(),
+      ),
+    ).then(
+      (_) => loadDashboard(),
+    );
+  }
 
   Widget dashboardContent() {
     return RefreshIndicator(
@@ -1337,12 +2088,21 @@ if (entry['end_time'] != null) ...[
         child: Column(
           children: [
             buildHeader(),
-            if (runningEntry != null) ...[
+            if (!isAdmin && runningEntry != null) ...[
               const SizedBox(height: 20),
               buildRunningTimer(),
             ],
             const SizedBox(height: 20),
-            buildActivityList(),
+
+            // Employee dashboard remains exactly as before.
+            // Admin gets the new pie chart + individual weekly comparison.
+            if (isAdmin)
+              AdminWeeklyOverview(
+                employees: adminEmployeeWeekSummaries,
+              )
+            else
+              buildActivityList(),
+
             const SizedBox(height: 30),
           ],
         ),
@@ -1366,6 +2126,9 @@ Widget buildSelectedPage() {
     case 'keyboard_activity':
       return const KeyboardActivityScreen();
 
+    case 'ai_summary':
+  return const AiSummaryScreen();
+
     case 'leave':
       return const LeaveRequestScreen();
 
@@ -1385,9 +2148,9 @@ Widget buildSelectedPage() {
       return const LeaveApprovalScreen();
 
     case 'billing':
-  return BillingScreen(
-    workspaceId: currentWorkspaceId,
-  );
+      return BillingScreen(
+        workspaceId: currentWorkspaceId,
+      );
 
     case 'change_password':
       return const ChangePasswordScreen();
@@ -1444,147 +2207,161 @@ Widget buildSelectedPage() {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    // Large desktop: full sidebar by default.
+    // Smaller laptop/browser: automatically show icon-only sidebar.
+    final bool autoCollapseSidebar = screenWidth < 1200;
+
+    final bool effectiveSidebarCollapsed =
+        autoCollapseSidebar || sidebarCollapsed;
+
     return Listener(
       onPointerDown: (_) => resetSessionTimer(),
       onPointerMove: (_) => resetSessionTimer(),
       onPointerHover: (_) => resetSessionTimer(),
       child: Scaffold(
         backgroundColor: background,
-       body: Row(
-  children: [
-    ValueListenableBuilder<String>(
-      valueListenable: currentWorkspaceNameNotifier,
-      builder: (context, workspaceName, _) {
-        return DashboardSidebar(
-          workspaceName: workspaceName.isEmpty
-              ? currentWorkspaceName
-              : workspaceName,
-          currentPage: selectedPage,
-          isAdmin: isAdmin,
-          isCollapsed: sidebarCollapsed,
+        body: Row(
+          children: [
+            DashboardSidebar(
+              workspaceName: currentWorkspaceName,
+              currentPage: selectedPage,
+              isAdmin: isAdmin,
+              isCollapsed: effectiveSidebarCollapsed,
 
-          onToggle: () {
-            setState(() {
-              sidebarCollapsed = !sidebarCollapsed;
-            });
-          },
+              // On smaller laptop widths the sidebar stays icon-only.
+              // On large desktop the admin can manually collapse/expand it.
+              onToggle: autoCollapseSidebar
+                  ? null
+                  : () {
+                      setState(() {
+                        sidebarCollapsed = !sidebarCollapsed;
+                      });
+                    },
 
-          onDashboard: () {
-            resetSessionTimer();
+              onDashboard: () async {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'dashboard';
-            });
+                setState(() {
+                  selectedPage = 'dashboard';
+                });
 
-            loadDashboard();
-          },
+                await loadDashboard();
+              },
 
-          onTimer: () {
-            resetSessionTimer();
+              onTimer: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'timer';
-            });
-          },
+                setState(() {
+                  selectedPage = 'timer';
+                });
+              },
 
-          onTimesheet: () {
-            resetSessionTimer();
+              onTimesheet: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'timesheet';
-            });
-          },
+                setState(() {
+                  selectedPage = 'timesheet';
+                });
+              },
 
-          onScreenshots: () {
-            resetSessionTimer();
+              onScreenshots: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'screenshots';
-            });
-          },
+                setState(() {
+                  selectedPage = 'screenshots';
+                });
+              },
 
-          onKeyboardActivity: () {
-            resetSessionTimer();
+              onKeyboardActivity: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'keyboard_activity';
-            });
-          },
+                setState(() {
+                  selectedPage = 'keyboard_activity';
+                });
+              },
 
-          onLeave: () {
-            resetSessionTimer();
+              onAiSummary: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'leave';
-            });
-          },
+                setState(() {
+                  selectedPage = 'ai_summary';
+                });
+              },
 
-          onEmployees: () {
-            resetSessionTimer();
+              onLeave: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'employees';
-            });
-          },
+                setState(() {
+                  selectedPage = 'leave';
+                });
+              },
 
-          onProjects: () {
-            resetSessionTimer();
+              onEmployees: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'projects';
-            });
-          },
+                setState(() {
+                  selectedPage = 'employees';
+                });
+              },
 
-          onWorkspace: () {
-            resetSessionTimer();
+              onProjects: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'workspace';
-            });
-          },
+                setState(() {
+                  selectedPage = 'projects';
+                });
+              },
 
-          onReports: () {
-            resetSessionTimer();
+              onWorkspace: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'reports';
-            });
-          },
+                setState(() {
+                  selectedPage = 'workspace';
+                });
+              },
 
-          onApprovals: () {
-            resetSessionTimer();
+              onReports: () {
+                resetSessionTimer();
 
-            setState(() {
-              selectedPage = 'approvals';
-            });
-          },
-          
-          onBilling: () {
-  resetSessionTimer();
+                setState(() {
+                  selectedPage = 'reports';
+                });
+              },
 
-  setState(() {
-    selectedPage = 'billing';
-  });
-},
+              onApprovals: () {
+                resetSessionTimer();
 
-          onChangePassword: () {
-            resetSessionTimer();
+                setState(() {
+                  selectedPage = 'approvals';
+                });
+              },
 
-            setState(() {
-              selectedPage = 'change_password';
-            });
-          },
+              onBilling: () {
+                resetSessionTimer();
 
-          onLogout: logout,
-        );
-      },
-    ),
+                setState(() {
+                  selectedPage = 'billing';
+                });
+              },
 
-        Expanded(
-      child: buildSelectedPage(),
-    ),
-  ],
-),
+              onChangePassword: () {
+                resetSessionTimer();
+
+                setState(() {
+                  selectedPage = 'change_password';
+                });
+              },
+
+              onLogout: logout,
+            ),
+
+            Expanded(
+              child: buildSelectedPage(),
+            ),
+          ],
+        ),
       ),
     );
   }
