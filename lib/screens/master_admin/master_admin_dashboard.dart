@@ -751,7 +751,7 @@ Future<void> loadDashboard() async {
                             scale: 0.78,
                             child: Switch(
                               value: workspaceActive,
-                              activeColor: Colors.white,
+                              activeThumbColor: Colors.white,
                               activeTrackColor: Colors.green,
                               inactiveThumbColor: Colors.white,
                               inactiveTrackColor:

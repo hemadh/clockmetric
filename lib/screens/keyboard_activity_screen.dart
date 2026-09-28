@@ -892,7 +892,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
       width: 220,
       height: 34,
       child: DropdownButtonFormField<String>(
-        value: selectedEmployeeId,
+        initialValue: selectedEmployeeId,
         isExpanded: true,
         isDense: true,
         style: const TextStyle(
@@ -971,7 +971,7 @@ class _KeyboardActivityScreenState extends State<KeyboardActivityScreen> {
       child:
           DropdownButtonFormField<
               int>(
-        value: selectedDayIndex,
+        initialValue: selectedDayIndex,
         isExpanded: true,
         isDense: true,
         style: const TextStyle(

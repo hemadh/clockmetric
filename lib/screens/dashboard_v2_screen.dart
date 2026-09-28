@@ -36,10 +36,9 @@ class _MutableAdminEmployeeWeekSummary {
   _MutableAdminEmployeeWeekSummary({
     required this.employeeId,
     required this.employeeName,
-    this.thisWeek = Duration.zero,
-    this.previousWeek = Duration.zero,
-    this.isWorking = false,
-  });
+  })  : thisWeek = Duration.zero,
+        previousWeek = Duration.zero,
+        isWorking = false;
 }
 
 class DashboardV2Screen extends StatefulWidget {
@@ -541,7 +540,12 @@ for (final profile in profiles) {
 
     final calculated = end.difference(start);
 
-    if (calculated > const Duration(hours: 24)) {
+    // Do not hide long entries only on the Dashboard.
+    // Every ClockMetric screen must reflect the same time_entries data.
+    // If an incorrect completed entry is deleted by the employee,
+    // TimeEntryService deletes that database row and it disappears
+    // from Dashboard, Timesheet, Reports, charts and weekly totals.
+    if (calculated.isNegative) {
       return Duration.zero;
     }
 
@@ -1830,7 +1834,7 @@ Future<void> deleteTimeEntry(
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          'Time entry deleted successfully.',
+          'Time entry deleted. It will be removed from all ClockMetric totals and reports.',
         ),
         backgroundColor: Colors.green,
       ),

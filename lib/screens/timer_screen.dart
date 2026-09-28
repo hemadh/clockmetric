@@ -1196,7 +1196,7 @@ if (!isRunning &&
                       else
                         DropdownButtonFormField<
                             String>(
-                          value:
+                          initialValue:
                               validDropdownValue,
                           isExpanded: true,
                           decoration:

@@ -40,7 +40,7 @@ class RunningTimersCard extends StatelessWidget {
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.035),
+            color: Colors.black.withValues(alpha: .035),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -77,7 +77,7 @@ class RunningTimersCard extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 itemCount: liveEmployees.length,
-                separatorBuilder: (_, __) => const Divider(height: 18),
+                separatorBuilder: (_, _) => const Divider(height: 18),
                 itemBuilder: (_, index) {
                   final row = liveEmployees[index];
                   final employee = row['employee_name'] ?? 'Employee';

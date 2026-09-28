@@ -43,7 +43,7 @@ class DashboardHeader extends StatelessWidget {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFF97316).withOpacity(.28),
+            color: const Color(0xFFF97316).withValues(alpha: .28),
             blurRadius: 30,
             offset: const Offset(0, 16),
           ),
@@ -111,7 +111,7 @@ class DashboardHeader extends StatelessWidget {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.15),
+                    color: Colors.white.withValues(alpha: .15),
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Text(
@@ -132,7 +132,7 @@ class DashboardHeader extends StatelessWidget {
             width: 210,
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(.15),
+              color: Colors.white.withValues(alpha: .15),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Column(

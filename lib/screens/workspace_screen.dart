@@ -1323,7 +1323,7 @@ Future<void> resendWorkspaceInvitation(
             height: 420,
             child: ListView.separated(
               itemCount: allWorkspaces.length,
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (_, _) =>
                   const SizedBox(height: 6),
               itemBuilder: (context, index) {
                 final item = allWorkspaces[index];
@@ -1566,7 +1566,7 @@ Future<void> resendWorkspaceInvitation(
                           Expanded(
                             child: ListView.separated(
                               itemCount: availableProjects.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const SizedBox(height: 9),
                               itemBuilder: (context, index) {
                                 final project =
@@ -1824,7 +1824,7 @@ Future<void> resendWorkspaceInvitation(
                           Expanded(
                             child: ListView.separated(
                               itemCount: members.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const SizedBox(height: 9),
                               itemBuilder: (context, index) {
                                 final employee = members[index];
@@ -2122,7 +2122,7 @@ Widget buildWorkspaceHero({
               width: 54,
               height: 54,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(.08),
+                color: AppColors.primary.withValues(alpha: .08),
                 borderRadius: BorderRadius.circular(13),
               ),
               child: const Icon(
@@ -2651,7 +2651,7 @@ Widget buildRunningSection() {
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: Colors.green.withOpacity(.12),
+                  backgroundColor: Colors.green.withValues(alpha: .12),
                   foregroundColor: Colors.green,
                   child: const Icon(Icons.play_arrow_rounded),
                 ),

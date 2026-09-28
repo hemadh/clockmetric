@@ -37,6 +37,9 @@ class _BillingScreenState extends State<BillingScreen> {
   bool loadingBilling = true;
   bool billingActionLoading = false;
 
+  List<Map<String, dynamic>> invoices = [];
+  bool loadingInvoices = true;
+
 
   bool get isTrialExpired {
     if (trialEndsAt == null) return false;
@@ -119,6 +122,7 @@ class _BillingScreenState extends State<BillingScreen> {
     super.initState();
     _loadActiveEmployeeCount();
     _loadBillingDetails();
+    _loadInvoices();
   }
 
   Future<void> _loadActiveEmployeeCount() async {
@@ -138,6 +142,43 @@ class _BillingScreenState extends State<BillingScreen> {
       });
     } catch (e) {
       debugPrint('Billing employee count error: $e');
+    }
+  }
+
+  Future<void> _loadInvoices() async {
+    if (mounted) {
+      setState(() {
+        loadingInvoices = true;
+      });
+    }
+
+    try {
+      final response = await supabase
+          .from('workspace_invoices')
+          .select(
+            'id, status, currency, amount_due, amount_paid, '
+            'invoice_url, invoice_pdf_url, period_start, period_end, '
+            'paid_at, created_at',
+          )
+          .eq('workspace_id', widget.workspaceId)
+          .order('created_at', ascending: false)
+          .limit(10);
+
+      if (!mounted) return;
+
+      setState(() {
+        invoices = List<Map<String, dynamic>>.from(response);
+        loadingInvoices = false;
+      });
+    } catch (e) {
+      debugPrint('Billing invoice load error: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        invoices = [];
+        loadingInvoices = false;
+      });
     }
   }
 
@@ -395,6 +436,26 @@ class _BillingScreenState extends State<BillingScreen> {
     }
   }
 
+  Future<void> _openInvoice(String? rawUrl) async {
+    if (rawUrl == null || rawUrl.trim().isEmpty) return;
+
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return;
+
+    final opened = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open invoice.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _handleBillingAction() async {
     if (canOpenBillingPortal) {
       await _openBillingPortal();
@@ -408,6 +469,7 @@ class _BillingScreenState extends State<BillingScreen> {
     await Future.wait([
       _loadActiveEmployeeCount(),
       _loadBillingDetails(),
+      _loadInvoices(),
     ]);
   }
 
@@ -432,6 +494,49 @@ class _BillingScreenState extends State<BillingScreen> {
     return '${local.day.toString().padLeft(2, '0')}/'
         '${local.month.toString().padLeft(2, '0')}/'
         '${local.year}';
+  }
+
+  String _invoiceStatusText(dynamic value) {
+    final status = value?.toString().trim().toLowerCase() ?? '';
+
+    switch (status) {
+      case 'paid':
+        return 'Paid';
+      case 'open':
+        return 'Open';
+      case 'draft':
+        return 'Draft';
+      case 'void':
+        return 'Void';
+      case 'uncollectible':
+        return 'Uncollectible';
+      default:
+        return status.isEmpty
+            ? 'Unknown'
+            : status
+                .replaceAll('_', ' ')
+                .toUpperCase();
+    }
+  }
+
+  String _invoiceAmountText(Map<String, dynamic> invoice) {
+    final paid =
+        (invoice['amount_paid'] as num?)?.toDouble() ?? 0;
+    final due =
+        (invoice['amount_due'] as num?)?.toDouble() ?? 0;
+
+    final amount = paid > 0 ? paid : due;
+    final currency =
+        invoice['currency']?.toString().trim().toUpperCase() ??
+            billingCurrency;
+
+    final text = amount == amount.roundToDouble()
+        ? amount.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+
+    return currency == 'AUD'
+        ? 'A\$$text'
+        : '$currency $text';
   }
 
   int get trialDaysRemaining {
@@ -1096,7 +1201,7 @@ value: (subscriptionStatus == 'active' ||
                                     mainAxisAlignment:
                                         MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(
+                                      const Text(
                                         'Invoices',
                                         style: TextStyle(
                                           fontSize: 15,
@@ -1132,49 +1237,193 @@ value: (subscriptionStatus == 'active' ||
 
                                   const SizedBox(height: 12),
 
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF9FAFB),
-                                      borderRadius:
-                                          BorderRadius.circular(10),
-                                      border: Border.all(color: border),
-                                    ),
-                                    child: const Column(
-                                      children: [
-                                        Icon(
-                                          Icons.receipt_long_rounded,
-                                          size: 27,
-                                          color: Color(0xFF9CA3AF),
-                                        ),
-
-                                        SizedBox(height: 6),
-
-                                        Text(
-                                          'No invoices yet',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: textDark,
+                                  if (loadingInvoices)
+                                    const SizedBox(
+                                      height: 76,
+                                      child: Center(
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: orange,
                                           ),
                                         ),
-
-                                        SizedBox(height: 3),
-
-                                        Text(
-                                          'Invoices will appear here after billing begins.',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 9.5,
-                                            color: textGrey,
+                                      ),
+                                    )
+                                  else if (invoices.isEmpty)
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            const Color(0xFFF9FAFB),
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                        border:
+                                            Border.all(color: border),
+                                      ),
+                                      child: const Column(
+                                        children: [
+                                          Icon(
+                                            Icons.receipt_long_rounded,
+                                            size: 27,
+                                            color: Color(0xFF9CA3AF),
                                           ),
-                                        ),
-                                      ],
+                                          SizedBox(height: 6),
+                                          Text(
+                                            'No invoices yet',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight:
+                                                  FontWeight.bold,
+                                              color: textDark,
+                                            ),
+                                          ),
+                                          SizedBox(height: 3),
+                                          Text(
+                                            'Invoices will appear here after billing begins.',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              color: textGrey,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    Column(
+                                      children: invoices.map((invoice) {
+                                        final createdText =
+                                            invoice['created_at']
+                                                ?.toString();
+
+                                        final createdAt =
+                                            createdText == null
+                                                ? null
+                                                : DateTime.tryParse(
+                                                    createdText,
+                                                  );
+
+                                        final invoiceUrl =
+                                            invoice['invoice_url']
+                                                    ?.toString();
+
+                                        final invoicePdfUrl =
+                                            invoice['invoice_pdf_url']
+                                                    ?.toString();
+
+                                        final openUrl =
+                                            invoiceUrl != null &&
+                                                    invoiceUrl
+                                                        .trim()
+                                                        .isNotEmpty
+                                                ? invoiceUrl
+                                                : invoicePdfUrl;
+
+                                        return Container(
+                                          margin: const EdgeInsets.only(
+                                            bottom: 8,
+                                          ),
+                                          padding:
+                                              const EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                            color: const Color(
+                                              0xFFF9FAFB,
+                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(
+                                              10,
+                                            ),
+                                            border: Border.all(
+                                              color: border,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width: 34,
+                                                height: 34,
+                                                decoration:
+                                                    BoxDecoration(
+                                                  color:
+                                                      const Color(
+                                                    0xFFFFEDD5,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius
+                                                          .circular(
+                                                    9,
+                                                  ),
+                                                ),
+                                                child: const Icon(
+                                                  Icons
+                                                      .receipt_long_rounded,
+                                                  size: 17,
+                                                  color: orange,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 9),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment
+                                                          .start,
+                                                  children: [
+                                                    Text(
+                                                      _invoiceAmountText(
+                                                        invoice,
+                                                      ),
+                                                      style:
+                                                          const TextStyle(
+                                                        fontSize: 11.5,
+                                                        fontWeight:
+                                                            FontWeight
+                                                                .bold,
+                                                        color: textDark,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(
+                                                      height: 2,
+                                                    ),
+                                                    Text(
+                                                      '${_invoiceStatusText(invoice['status'])}'
+                                                      ' • ${_dateText(createdAt)}',
+                                                      style:
+                                                          const TextStyle(
+                                                        fontSize: 9.5,
+                                                        color: textGrey,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              if (openUrl != null &&
+                                                  openUrl
+                                                      .trim()
+                                                      .isNotEmpty)
+                                                IconButton(
+                                                  tooltip:
+                                                      'Open invoice',
+                                                  onPressed: () =>
+                                                      _openInvoice(
+                                                    openUrl,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons
+                                                        .open_in_new_rounded,
+                                                    size: 17,
+                                                    color: orange,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
                                     ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -1374,7 +1623,7 @@ value: (subscriptionStatus == 'active' ||
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.10),
+              color: iconColor.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(
@@ -1444,7 +1693,7 @@ value: (subscriptionStatus == 'active' ||
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.10),
+            color: iconColor.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(9),
           ),
           child: Icon(

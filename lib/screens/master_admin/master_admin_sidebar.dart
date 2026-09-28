@@ -54,7 +54,7 @@ class MasterAdminSidebar extends StatelessWidget {
               borderRadius: BorderRadius.circular(21),
               boxShadow: [
                 BoxShadow(
-                  color: orange.withOpacity(0.14),
+                  color: orange.withValues(alpha: 0.14),
                   blurRadius: 20,
                   offset: const Offset(0, 7),
                 ),

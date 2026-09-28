@@ -36,7 +36,7 @@ class LeaderboardCard extends StatelessWidget {
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.035),
+            color: Colors.black.withValues(alpha: .035),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -73,7 +73,7 @@ class LeaderboardCard extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 itemCount: entries.length,
-                separatorBuilder: (_, __) => const Divider(height: 18),
+                separatorBuilder: (_, _) => const Divider(height: 18),
                 itemBuilder: (_, index) {
                   final item = entries[index];
 
@@ -96,7 +96,7 @@ class LeaderboardCard extends StatelessWidget {
                       ),
                       CircleAvatar(
                         radius: 20,
-                        backgroundColor: orange.withOpacity(.14),
+                        backgroundColor: orange.withValues(alpha: .14),
                         child: Text(
                           item.key.isEmpty ? "U" : item.key[0].toUpperCase(),
                           style: const TextStyle(

@@ -47,7 +47,7 @@ class EmployeePieChart extends StatelessWidget {
         borderRadius: BorderRadius.circular(26),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.04),
+            color: Colors.black.withValues(alpha: .04),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -140,7 +140,7 @@ class EmployeePieChart extends StatelessWidget {
                                 radius: 16,
                                 backgroundColor:
                                     colors[index % colors.length]
-                                        .withOpacity(.14),
+                                        .withValues(alpha: .14),
                                 child: Text(
                                   item.key.isEmpty
                                       ? "U"

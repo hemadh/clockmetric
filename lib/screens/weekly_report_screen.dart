@@ -561,7 +561,7 @@ class _WeeklyReportScreenState
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.12),
+              color: accentColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
@@ -998,7 +998,7 @@ class _WeeklyReportScreenState
                           itemCount:
                               employees.length,
                           separatorBuilder:
-                              (_, __) =>
+                              (_, _) =>
                                   const Divider(
                             height: 1,
                             color: AppColors.border,
@@ -1545,7 +1545,7 @@ class _WeeklyReportScreenState
         vertical: 4,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.11),
+        color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(

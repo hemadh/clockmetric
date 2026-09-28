@@ -602,8 +602,8 @@ return '${DateFormat('h a').format(start)} - '
                       vertical: 9,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(
-                        0.72,
+                      color: Colors.black.withValues(
+                        alpha: 0.72,
                       ),
                       borderRadius:
                           BorderRadius.circular(8),
@@ -1291,7 +1291,7 @@ return '${DateFormat('h a').format(start)} - '
   SizedBox(
     width: 220,
     child: DropdownButtonFormField<String>(
-      value: selectedEmployee,
+      initialValue: selectedEmployee,
       decoration: InputDecoration(
         labelText: 'Employee',
         filled: true,
@@ -1565,8 +1565,8 @@ class _ScreenshotHoverOverlayState
         opacity: hovering ? 1 : 0,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(
-              0.48,
+            color: Colors.black.withValues(
+              alpha: 0.48,
             ),
             borderRadius:
                 BorderRadius.circular(8),

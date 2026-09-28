@@ -38,7 +38,7 @@ class LiveEmployeesCard extends StatelessWidget {
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.04),
+            color: Colors.black.withValues(alpha: .04),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -75,7 +75,7 @@ class LiveEmployeesCard extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 itemCount: liveEmployees.length,
-                separatorBuilder: (_, __) => const Divider(height: 18),
+                separatorBuilder: (_, _) => const Divider(height: 18),
                 itemBuilder: (_, index) {
                   final row = liveEmployees[index];
 
@@ -90,7 +90,7 @@ class LiveEmployeesCard extends StatelessWidget {
                         children: [
                           CircleAvatar(
                             radius: 24,
-                            backgroundColor: orange.withOpacity(.14),
+                            backgroundColor: orange.withValues(alpha: .14),
                             child: Text(
                               name.isEmpty ? "U" : name[0].toUpperCase(),
                               style: const TextStyle(

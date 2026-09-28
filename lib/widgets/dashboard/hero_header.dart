@@ -49,7 +49,7 @@ class HeroHeader extends StatelessWidget {
         border: Border.all(color: border),
         boxShadow: [
           BoxShadow(
-            color: orange.withOpacity(.13),
+            color: orange.withValues(alpha: .13),
             blurRadius: 34,
             offset: const Offset(0, 16),
           ),
@@ -177,12 +177,12 @@ class HeroHeader extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(.92),
+              color: Colors.white.withValues(alpha: .92),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: border),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(.05),
+                  color: Colors.black.withValues(alpha: .05),
                   blurRadius: 14,
                   offset: const Offset(0, 6),
                 ),
@@ -216,7 +216,7 @@ class HeroHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.9),
+        color: Colors.white.withValues(alpha: .9),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: border),
       ),
@@ -242,7 +242,7 @@ class HeroHeader extends StatelessWidget {
       height: 112,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.92),
+        color: Colors.white.withValues(alpha: .92),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: border),
       ),

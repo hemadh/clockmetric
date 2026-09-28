@@ -1090,7 +1090,7 @@ class _ProjectManagementScreenState
                           Expanded(
                             child: ListView.separated(
                               itemCount: employees.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 final employee =

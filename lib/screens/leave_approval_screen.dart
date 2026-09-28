@@ -457,11 +457,11 @@ if (updatedRows.isEmpty) {
   Color statusBackground(String status) {
     switch (status) {
       case 'approved':
-        return AppColors.success.withOpacity(0.12);
+        return AppColors.success.withValues(alpha: 0.12);
       case 'rejected':
-        return AppColors.danger.withOpacity(0.10);
+        return AppColors.danger.withValues(alpha: 0.10);
       default:
-        return AppColors.warning.withOpacity(0.14);
+        return AppColors.warning.withValues(alpha: 0.14);
     }
   }
 
